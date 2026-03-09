@@ -5,15 +5,16 @@ import { format, addDays } from 'date-fns';
 import { Utensils } from 'lucide-react';
 import { MEAL_ORDER } from '../lib/constants';
 
+const MEAL_COLORS = {
+    Breakfast: 'text-orange-600 dark:text-orange-400 border-orange-200 dark:border-orange-500/30',
+    Lunch: 'text-emerald-600 dark:text-emerald-400 border-emerald-200 dark:border-emerald-500/30',
+    Snacks: 'text-amber-600 dark:text-amber-400 border-amber-200 dark:border-amber-500/30',
+    Dinner: 'text-indigo-600 dark:text-indigo-400 border-indigo-200 dark:border-indigo-500/30',
+};
+
 export const WeeklyMenuGrid = ({ userData, theme = 'orange' }) => {
     const [weeklyMenus, setWeeklyMenus] = useState([]);
     const [isLoading, setIsLoading] = useState(true);
-
-    const themeColors = theme === 'purple'
-        ? { bg: 'bg-purple-50', border: 'border-purple-200', text: 'text-purple-800', header: 'bg-purple-100' }
-        : theme === 'blue'
-            ? { bg: 'bg-blue-50', border: 'border-blue-200', text: 'text-blue-800', header: 'bg-blue-100' }
-            : { bg: 'bg-orange-50', border: 'border-orange-200', text: 'text-orange-800', header: 'bg-orange-100' };
 
     useEffect(() => {
         if (!userData?.hostel) return;
@@ -22,25 +23,29 @@ export const WeeklyMenuGrid = ({ userData, theme = 'orange' }) => {
             setIsLoading(true);
         }, 0);
 
-        const today = new Date().toISOString().split('T')[0];
-        const nextWeek = addDays(new Date(), 6).toISOString().split('T')[0];
+        // Fix: Use toLocaleDateString('en-CA') to get local date in YYYY-MM-DD format
+        const today = new Date().toLocaleDateString('en-CA');
+        const endDate = addDays(new Date(), 14).toLocaleDateString('en-CA'); // 15 days
 
         const q = query(
             collection(db, 'artifacts', appId, 'public', 'data', 'menus'),
             where('hostel', '==', userData.hostel),
             where('messType', '==', userData.messType),
             where('date', '>=', today),
-            where('date', '<=', nextWeek),
+            where('date', '<=', endDate),
             orderBy('date', 'asc'),
-            limit(7)
+            limit(15)
         );
 
         const unsub = onSnapshot(q, (snap) => {
             const menus = snap.docs.map(doc => doc.data());
 
-            // Map fetched menus to a full 7-day array to ensure blanks are shown if data is missing
-            const filledWeeklyMenus = Array.from({ length: 7 }).map((_, i) => {
-                const targetDate = addDays(new Date(), i).toISOString().split('T')[0];
+            // Map fetched menus to a full 15-day array ensuring blanks are shown if data is missing
+            const filledWeeklyMenus = Array.from({ length: 15 }).map((_, i) => {
+                // Use local midnight as base to avoid UTC offset shifting the date
+                const localBase = new Date();
+                localBase.setHours(0, 0, 0, 0);
+                const targetDate = addDays(localBase, i).toLocaleDateString('en-CA');
                 const found = menus.find(m => m.date === targetDate);
                 return found || { date: targetDate, breakfast: '', lunch: '', snacks: '', dinner: '' };
             });
@@ -85,43 +90,48 @@ export const WeeklyMenuGrid = ({ userData, theme = 'orange' }) => {
                            text-[#0D0D0D] section-dot
                            dark:text-white dark:uppercase dark:tracking-[-0.03em]">
                 <Utensils size={22} className="text-[#0057FF] dark:text-[#D4F000]" />
-                <span className="hidden dark:inline">7-DAY MENU</span>
-                <span className="dark:hidden">7-Day Overview</span>
+                <span className="hidden dark:inline">15-DAY MENU</span>
+                <span className="dark:hidden">15-Day Overview</span>
             </h2>
 
-            <div className="grid gap-4 grid-cols-1 sm:grid-cols-2 lg:grid-cols-7">
+            <div className="grid gap-4 grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-5 xl:grid-cols-7">
                 {weeklyMenus.map((dayMenu, idx) => {
                     const isToday = idx === 0;
+                    const primaryBorder = "border-primary";
+                    const primaryBg = "bg-primary";
+                    const neutralBorder = "border-zinc-300 dark:border-zinc-800";
+                    const neutralBg = "bg-zinc-100 dark:bg-zinc-800";
+
                     return (
-                        <div key={dayMenu.date} className={`flex flex-col rounded-card dark:rounded-card-xl border overflow-hidden transition-all duration-200 hover:shadow-card-md ${isToday
-                            ? 'border-[#0057FF] dark:border-[#D4F000] shadow-blue-glow dark:shadow-nik-glow'
-                            : 'bg-white dark:bg-[#1A1A1A] border-[#E4E4E4] dark:border-[#2A2A2A] shadow-card dark:shadow-card-dark'
+                        <div key={dayMenu.date} className={`flex flex-col rounded-[2rem] border-[4px] overflow-hidden transition-all duration-300 hover:shadow-2xl ${isToday
+                            ? `${primaryBorder} shadow-[0_12px_40px_rgba(var(--color-primary),0.2)] dark:shadow-[0_12px_40px_rgba(var(--color-primary),0.15)] z-10 scale-[1.02]`
+                            : `${neutralBorder} bg-white dark:bg-[#1A1A1A] shadow-md opacity-90`
                             }`}>
                             {/* Day header */}
-                            <div className={`p-3 text-center border-b ${isToday
-                                ? 'bg-[#0057FF] dark:bg-[#D4F000] border-transparent'
-                                : 'bg-[#F0F0F0] dark:bg-[#0D0D0D] border-[#E4E4E4] dark:border-[#2A2A2A]'
-                                }`}>
-                                <p className={`text-[11px] font-black uppercase tracking-widest ${isToday ? 'text-white dark:text-[#0D0D0D]' : 'text-[#6B6B6B] dark:text-[#A0A0A0]'
-                                    }`}>
-                                    {isToday ? 'TODAY' : format(new Date(dayMenu.date), 'EEE')}
+                            <div className={`p-5 text-center ${isToday ? primaryBg : neutralBg}`}>
+                                <p className={`text-[10px] font-black uppercase tracking-[0.15em] ${isToday ? 'text-white dark:text-[#0D0D0D]' : 'text-zinc-500 dark:text-zinc-400'}`}>
+                                    {isToday ? 'TODAY' : format(new Date(dayMenu.date + 'T00:00:00'), 'EEEE')}
                                 </p>
-                                <p className={`text-xs font-bold mt-0.5 ${isToday ? 'text-white/80 dark:text-[#0D0D0D]/70' : 'text-[#A0A0A0] dark:text-[#5A5A5A]'
-                                    }`}>
-                                    {format(new Date(dayMenu.date), 'MMM d')}
+                                <p className={`text-base font-black mt-0.5 ${isToday ? 'text-white dark:text-[#0D0D0D]' : 'text-[#0D0D0D] dark:text-[#E0E0E0]'}`}>
+                                    {format(new Date(dayMenu.date + 'T00:00:00'), 'MMM d')}
                                 </p>
                             </div>
 
                             {/* Meal rows */}
-                            <div className="p-3 space-y-3 flex-grow bg-white dark:bg-[#1A1A1A]">
-                                {MEAL_ORDER.map(meal => (
-                                    <div key={meal} className="border-b border-[#F0F0F0] dark:border-[#2A2A2A] last:border-0 pb-2 last:pb-0">
-                                        <p className="text-[9px] font-black text-[#A0A0A0] uppercase tracking-widest mb-1">{meal}</p>
-                                        <p className="text-xs text-[#0D0D0D] dark:text-[#E0E0E0] font-medium whitespace-pre-wrap leading-snug">
-                                            {dayMenu[meal.toLowerCase()] || <span className="text-[#A0A0A0] dark:text-[#5A5A5A] italic">Not set</span>}
-                                        </p>
-                                    </div>
-                                ))}
+                            <div className="p-4 space-y-4 flex-grow bg-white dark:bg-[#1A1A1A]">
+                                {MEAL_ORDER.map(meal => {
+                                    const mealStyles = MEAL_COLORS[meal];
+                                    return (
+                                        <div key={meal} className={`border-b-2 ${mealStyles.split(' ').slice(2).join(' ')} last:border-0 pb-3 last:pb-0`}>
+                                            <p className={`text-[9px] font-black uppercase tracking-widest mb-1.5 ${mealStyles.split(' ').slice(0, 2).join(' ')}`}>
+                                                {meal}
+                                            </p>
+                                            <p className="text-[13px] text-[#0D0D0D] dark:text-[#E0E0E0] font-black whitespace-pre-wrap leading-tight tracking-tight">
+                                                {dayMenu[meal.toLowerCase()] || <span className="text-[#A0A0A0] dark:text-[#5A5A5A] italic font-medium">Not set</span>}
+                                            </p>
+                                        </div>
+                                    );
+                                })}
                             </div>
                         </div>
                     );

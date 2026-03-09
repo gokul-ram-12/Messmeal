@@ -78,9 +78,13 @@ const App = () => {
 
   useEffect(() => {
     const root = document.documentElement;
-    root.classList.remove('theme-green', 'theme-blue', 'dark');
-    if (settings.theme === 'green') root.classList.add('theme-green');
-    if (settings.theme === 'blue') root.classList.add('theme-blue');
+    // Remove all possible theme classes
+    const themeClasses = ['theme-orange', 'theme-blue', 'theme-green', 'theme-purple', 'theme-indigo'];
+    themeClasses.forEach(cls => root.classList.remove(cls));
+    root.classList.remove('dark');
+
+    // Apply current preferences
+    if (settings.theme) root.classList.add(`theme-${settings.theme}`);
     if (settings.darkMode) root.classList.add('dark');
     root.style.fontSize = `${settings.fontScale * 16}px`;
   }, [settings.theme, settings.darkMode, settings.fontScale]);
@@ -107,6 +111,8 @@ const App = () => {
 
   // Auth & User Data Lifecycle
   useEffect(() => {
+    let unsubscribeUser = null;
+
     const unsubscribeAuth = onAuthStateChanged(auth, async (currentUser) => {
       if (currentUser) {
         localStorage.setItem('isLoggedIn', 'true');
@@ -118,7 +124,9 @@ const App = () => {
         else setViewMode('user');
 
         // Instead of a single getDoc, let's listen to user document so changes (like approval) reflect immediately
-        const unsubscribeUser = onSnapshot(doc(db, 'artifacts', appId, 'users', currentUser.uid), (docSnap) => {
+        if (unsubscribeUser) unsubscribeUser(); // cleanup old listener if it exists
+
+        unsubscribeUser = onSnapshot(doc(db, 'artifacts', appId, 'users', currentUser.uid), (docSnap) => {
           if (docSnap.exists()) {
             setUserData(docSnap.data());
           } else {
@@ -128,17 +136,25 @@ const App = () => {
         }, (err) => {
           setAuthLoading(false);
         });
-
-        return () => unsubscribeUser(); // Cleanup user listener on auth change
       } else {
         localStorage.removeItem('isLoggedIn');
         setUser(null);
         setUserData(null);
         setAuthLoading(false);
+        if (unsubscribeUser) {
+          unsubscribeUser();
+          unsubscribeUser = null;
+        }
       }
     });
-    return () => unsubscribeAuth();
+
+    return () => {
+      unsubscribeAuth();
+      if (unsubscribeUser) unsubscribeUser();
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
 
   // Request FCM Token
   useEffect(() => {

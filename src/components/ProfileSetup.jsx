@@ -10,8 +10,8 @@ export const ProfileSetupScreen = ({ user, userData, onComplete, theme = 'orange
 
     const [name, setName] = useState(userData?.name || user?.displayName || user?.email?.split('@')[0] || '');
     const [avatar, setAvatar] = useState(userData?.avatar || 'boy');
-    const [hostel, setHostel] = useState(userData?.hostel || defaultHostels[0]);
-    const [messType, setMessType] = useState(userData?.messType || defaultMessTypes[0]);
+    const [hostel, setHostel] = useState(userData?.hostel || (config?.hostels?.length > 0 ? config.hostels[0] : (DEFAULT_HOSTELS[0])));
+    const [messType, setMessType] = useState(userData?.messType || (config?.messTypes?.length > 0 ? config.messTypes[0] : (DEFAULT_MESS_TYPES[0])));
     const [loading, setLoading] = useState(false);
     const [step, setStep] = useState(1);
     const [studyingYear, setStudyingYear] = useState(userData?.studyingYear || '1');

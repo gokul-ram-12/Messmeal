@@ -13,7 +13,8 @@ export const DateStrip = ({ selectedDate, onSelectDate, theme = 'orange' }) => {
         return d;
     }, []);
 
-    const isSameDay = (d1, d2String) => d1.toISOString().split('T')[0] === d2String;
+    const isSameDay = (d1, d2String) => d1.toLocaleDateString('en-CA') === d2String;
+
 
     // Auto-scroll to today
     useEffect(() => {
@@ -28,23 +29,22 @@ export const DateStrip = ({ selectedDate, onSelectDate, theme = 'orange' }) => {
             <div ref={scrollRef} className="flex overflow-x-auto gap-3 pb-4 px-2 snap-x scrollbar-hide" style={{ scrollBehavior: 'smooth' }}>
                 {dates.map((date, idx) => {
                     const isSelected = isSameDay(date, selectedDate);
-                    const isToday = isSameDay(date, new Date().toISOString().split('T')[0]);
+                    const isToday = isSameDay(date, new Date().toLocaleDateString('en-CA'));
 
                     return (
                         <button
                             key={idx}
                             data-today={isToday}
-                            onClick={() => onSelectDate(date.toISOString().split('T')[0])}
+                            onClick={() => onSelectDate(date.toLocaleDateString('en-CA'))}
                             className={[
-                                'flex-shrink-0 w-16 h-20 rounded-2xl flex flex-col items-center justify-center transition-all duration-200 snap-center border',
+                                'flex-shrink-0 w-16 h-20 rounded-2xl flex flex-col items-center justify-center transition-all duration-300 snap-center border-[4px]',
                                 isSelected
-                                    // Light: blue fill. Dark: yellow fill + black text
-                                    ? 'bg-[#0057FF] dark:bg-[#D4F000] text-white dark:text-[#0D0D0D] border-transparent scale-105 shadow-blue-glow dark:shadow-nik-glow'
+                                    ? 'bg-primary text-white dark:text-[#0D0D0D] border-primary scale-110 shadow-[0_8px_24px_rgba(var(--color-primary),0.3)]'
                                     : [
                                         'bg-white dark:bg-[#1A1A1A] text-[#6B6B6B] dark:text-[#A0A0A0]',
-                                        'border-[#E4E4E4] dark:border-[#2A2A2A]',
+                                        'border-zinc-200 dark:border-zinc-800',
                                         'hover:bg-[#F0F0F0] dark:hover:bg-[#2A2A2A] hover:text-[#0D0D0D] dark:hover:text-white shadow-sm',
-                                        isToday ? 'border-[#0057FF] dark:border-[#D4F000]' : '',
+                                        isToday ? 'border-primary' : '',
                                     ].join(' '),
                             ].join(' ')}
                         >

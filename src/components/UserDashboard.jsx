@@ -18,7 +18,7 @@ import { WeeklyMenuGrid } from './WeeklyMenuGrid';
 import { ProfileSetupScreen } from './ProfileSetup';
 import { UnifiedFeedbackModal } from './UnifiedFeedbackModal';
 import { callGemini, callCalorieNinjas, getMealStatus, getTimeMinutes, compressImage } from '../lib/utils';
-import { DEFAULT_MEAL_TIMINGS, MEAL_ORDER, DEFAULT_RATING_WINDOW, DEFAULT_TAGLINE } from '../lib/constants';
+import { DEFAULT_MEAL_TIMINGS, MEAL_ORDER, DEFAULT_RATING_WINDOW, DEFAULT_TAGLINE, MEAL_ACCENTS } from '../lib/constants';
 
 export const UserDashboard = ({ user, userData, onLogout, onSwitchToAdmin, canSwitchToAdmin, config, settings, updateSettings }) => {
     const [activeTab, setActiveTab] = useState('menu');
@@ -194,41 +194,71 @@ export const UserDashboard = ({ user, userData, onLogout, onSwitchToAdmin, canSw
         }
     }, [user]);
 
-    // ── Midnight ratings reset: unlock when midnight passes ──
+    // ── Midnight ratings lock: lock previous day ratings at new day (00:00) ──
     useEffect(() => {
         const tick = () => {
             const now = new Date();
             if (now.getHours() === 0 && now.getMinutes() === 0) {
+                // Reset local star selections (not submitted ones — those are in Firestore)
                 setRatings({});
-                setSubmittedRatings({});
-                setSelectedDate(new Date().toLocaleDateString('en-CA'));
+                // Move to today's date in case user is still on yesterday's page
+                setSelectedDate(now.toLocaleDateString('en-CA'));
             }
         };
         const interval = setInterval(tick, 60000); // check every minute
         return () => clearInterval(interval);
     }, []);
 
-    const submitRating = async (meal) => {
-        const rating = ratings[meal];
-        if (!rating) return;
-        setSubmitting(true);
-        try {
-            await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'ratings'), {
-                studentId: user.uid,
-                studentName: userData.name,
-                hostel: userData.hostel,
-                messType: userData.messType,
-                date: selectedDate,
-                mealType: meal,
-                rating,
-                createdAt: serverTimestamp()
-            });
-            setRatings(prev => ({ ...prev, [meal]: 0 }));
-            toast.success(`${meal} rating submitted!`);
-        } catch {
-            toast.error("Failed to submit rating");
+    const [submittingMeal, setSubmittingMeal] = useState(null);
+    const [submittingAll, setSubmittingAll] = useState(false);
+
+    const submitAllRatings = async () => {
+        const todayStr = new Date().toLocaleDateString('en-CA');
+        // Only allow submitting ratings for today
+        if (selectedDate !== todayStr) {
+            toast.error("You can only submit ratings for today");
+            return;
         }
-        setSubmitting(false);
+
+        // Get all meals that are allowed, have a rating, and haven't been submitted yet
+        const mealsToSubmit = MEAL_ORDER.filter(meal =>
+            isRatingAllowed(meal) && ratings[meal] && !submittedRatings[meal]
+        );
+
+        if (mealsToSubmit.length === 0) {
+            toast.error("No new ratings to submit. Rate at least one meal first.");
+            return;
+        }
+
+        setSubmittingAll(true);
+        let successCount = 0;
+        try {
+            for (const meal of mealsToSubmit) {
+                await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'ratings'), {
+                    studentId: user.uid,
+                    studentName: userData.name,
+                    hostel: userData.hostel,
+                    messType: userData.messType,
+                    date: selectedDate,
+                    mealType: meal,
+                    rating: ratings[meal],
+                    createdAt: serverTimestamp()
+                });
+                successCount++;
+            }
+            // Clear submitted ratings from local state
+            setRatings(prev => {
+                const updated = { ...prev };
+                mealsToSubmit.forEach(meal => delete updated[meal]);
+                return updated;
+            });
+            toast.success(`${successCount} meal rating${successCount > 1 ? 's' : ''} submitted successfully!`);
+        } catch (error) {
+            console.error("Submit error:", error);
+            toast.error("Failed to submit ratings. Please try again.");
+        } finally {
+            setSubmittingAll(false);
+        }
     };
 
     const handleImageUpload = async (e) => {
@@ -321,27 +351,24 @@ export const UserDashboard = ({ user, userData, onLogout, onSwitchToAdmin, canSw
     const isRatingAllowed = (meal) => {
         const timing = activeTimings[meal];
         if (!timing) return false;
-        const selected = new Date(selectedDate);
-        const today = new Date();
-        today.setHours(0, 0, 0, 0);
-        selected.setHours(0, 0, 0, 0);
+
+        const todayStr = new Date().toLocaleDateString('en-CA');
 
         // Future dates are never allowed
-        if (selected > today) return false;
+        if (selectedDate > todayStr) return false;
 
-        // If today — locked before meal starts AND after midnight (00:00–meal start)
-        if (selected.getTime() === today.getTime()) {
+        // Previous day (before today) is always locked — ratings lock at midnight
+        if (selectedDate < todayStr) return false;
+
+        // Today: locked before the meal starts (open from meal start time onwards)
+        if (selectedDate === todayStr) {
             const now = new Date();
             const currentMinutes = now.getHours() * 60 + now.getMinutes();
             const startMinutes = getTimeMinutes(timing.start);
-            const endMinutes = getTimeMinutes(timing.end);
-            // Locked from 00:00 until meal start; open from meal start onwards (including after end)
             return currentMinutes >= startMinutes;
         }
 
-        // Past dates allowed if within the rating window (e.g., 48 hours)
-        const diffHours = (today - selected) / (1000 * 60 * 60);
-        return diffHours <= (config?.ratingWindow || DEFAULT_RATING_WINDOW);
+        return false;
     };
 
     if (showBouncingLogo) {
@@ -349,7 +376,7 @@ export const UserDashboard = ({ user, userData, onLogout, onSwitchToAdmin, canSw
     }
 
     if (showProfileEdit) {
-        return <ProfileSetupScreen user={user} userData={userData} onComplete={updateProfile} theme={theme} />;
+        return <ProfileSetupScreen user={user} userData={userData} onComplete={updateProfile} theme={theme} config={config} />;
     }
 
     return (
@@ -478,13 +505,18 @@ export const UserDashboard = ({ user, userData, onLogout, onSwitchToAdmin, canSw
 
                 {activeTab === 'feedback' && (
                     <div className="w-full max-w-4xl mx-auto space-y-6 animate-fade-in mt-4 pb-24">
+                        <DateStrip selectedDate={selectedDate} onSelectDate={setSelectedDate} theme={theme} />
                         <Card>
                             <h3 className="text-xl font-heading font-semibold text-dark dark:text-white mb-6 tracking-tight flex items-center justify-between">
-                                <span className="flex items-center gap-3"><Star className="text-primary fill-primary" size={24} /> Rate Today's Meals</span>
+                                <span className="flex items-center gap-3">
+                                    <Star className="text-primary fill-primary" size={24} />
+                                    Rate {selectedDate === new Date().toLocaleDateString('en-CA') ? "Today's" : format(new Date(selectedDate), 'MMM d')} Meals
+                                </span>
                             </h3>
 
                             <div className="space-y-4">
                                 {MEAL_ORDER.map((meal) => {
+                                    const mealSubmitted = submittedRatings[meal];
                                     const allowed = isRatingAllowed(meal);
                                     let message = "";
                                     if (!allowed) {
@@ -497,56 +529,94 @@ export const UserDashboard = ({ user, userData, onLogout, onSwitchToAdmin, canSw
                                     }
 
                                     const currentRating = ratings[meal] || 0;
-                                    const hasSubmitted = submittedRatings[meal];
+                                    const accent = MEAL_ACCENTS[meal] || MEAL_ACCENTS.Breakfast;
+                                    const primaryBorder = "border-primary";
+                                    const primaryBg = "bg-primary";
 
                                     return (
-                                        <div key={meal} className={`p-5 rounded-[24px] border transition-all duration-500 ${hasSubmitted ? 'bg-primary/20 border-primary shadow-[0_0_20px_rgba(var(--color-primary),0.2)]' :
-                                            !allowed ? 'bg-zinc-100 dark:bg-black/20 border-zinc-200 dark:border-white/5 opacity-60' :
-                                                'bg-white dark:bg-page border-zinc-200 dark:border-white/10 shadow-sm hover:shadow-md'
+                                        <div key={meal} className={`rounded-[2rem] border-[4px] overflow-hidden transition-all duration-500 scale-[0.98] hover:scale-100 ${primaryBorder} ${mealSubmitted ? 'bg-primary/10 shadow-[0_8px_32px_rgba(var(--color-primary),0.2)]' :
+                                            !allowed ? 'bg-zinc-100 dark:bg-[#1A1A1A] opacity-60' :
+                                                'bg-white dark:bg-[#0D0D0D] shadow-md'
                                             }`}>
-                                            <div className="flex items-center justify-between mb-4">
-                                                <h4 className="font-heading font-black text-dark dark:text-white tracking-tight text-lg">{meal}</h4>
-                                                {!allowed && !hasSubmitted && (
-                                                    <span className={`text-[10px] font-black uppercase tracking-[0.2em] px-3 py-1.5 rounded-xl border shadow-sm ${message === 'Upcoming' ? 'bg-[#0057FF]/10 text-[#0057FF] border-[#0057FF]/20' :
-                                                        message === 'Expired' ? 'bg-zinc-500/10 text-zinc-500 border-zinc-500/20' :
-                                                            'bg-amber-500/10 text-amber-500 border-amber-500/20 shadow-amber-500/5'
-                                                        }`}>
-                                                        {message}
-                                                    </span>
-                                                )}
-                                                {hasSubmitted && <span className="text-[10px] text-primary font-black px-3 py-1.5 rounded-xl bg-primary/20 flex items-center gap-1.5 uppercase tracking-widest"><CheckCircle2 size={12} /> Rated {hasSubmitted.rating}/5</span>}
+                                            {/* Header */}
+                                            <div className={`px-5 py-4 flex items-center justify-between ${primaryBg}`}>
+                                                <h4 className="font-heading font-black text-white dark:text-[#0D0D0D] tracking-tight text-lg uppercase">{meal}</h4>
+                                                <div className="flex items-center gap-2">
+                                                    {mealSubmitted && (
+                                                        <span className="bg-white/20 text-white dark:text-black text-[10px] font-black px-3 py-1.5 rounded-full uppercase">
+                                                            SUBMITTED
+                                                        </span>
+                                                    )}
+                                                    {!allowed && !mealSubmitted && (
+                                                        <span className="bg-black/10 text-white/70 text-[10px] font-black px-3 py-1.5 rounded-full uppercase mr-1">
+                                                            Pending
+                                                        </span>
+                                                    )}
+                                                </div>
                                             </div>
 
-                                            {!hasSubmitted && allowed && (
-                                                <>
-                                                    <div className="flex gap-2 justify-center mb-3">
-                                                        {[1, 2, 3, 4, 5].map((star) => (
-                                                            <button
-                                                                key={star}
-                                                                onClick={() => setRatings(prev => ({ ...prev, [meal]: star }))}
-                                                                className={`transition-transform hover:scale-110 focus:outline-none ${star <= currentRating ? 'scale-110 drop-shadow-sm' : ''}`}
-                                                            >
-                                                                <Star
-                                                                    size={32}
-                                                                    className={`${star <= currentRating ? 'text-primary fill-primary' : 'text-zinc-600/30'} transition-transform duration-300`}
-                                                                />
-                                                            </button>
-                                                        ))}
-                                                    </div>
-                                                    <Button
-                                                        onClick={() => submitRating(meal)}
-                                                        disabled={!currentRating || submitting}
-                                                        className="w-full text-sm py-2.5"
-                                                        loading={submitting}
-                                                    >
-                                                        Submit Rating
-                                                    </Button>
-                                                </>
+                                            <div className="p-6">
+                                                <div className="flex items-center gap-2 mb-4">
+                                                    <span className={`text-[10px] font-black px-3 py-1.5 rounded-lg uppercase tracking-widest ${accent.labelCls}`}>
+                                                        Session Rating
+                                                    </span>
+                                                </div>
+                                                {mealSubmitted && <span className="text-[10px] text-primary font-black px-3 py-1.5 rounded-xl bg-primary/20 flex items-center gap-1.5 uppercase tracking-widest"><CheckCircle2 size={12} /> Rated {mealSubmitted.rating}/5</span>}
+                                            </div>
+
+                                            {!mealSubmitted && allowed && (
+                                                <div className="flex gap-2 justify-center pb-4">
+                                                    {[1, 2, 3, 4, 5].map((star) => (
+                                                        <button
+                                                            key={star}
+                                                            onClick={() => setRatings(prev => ({ ...prev, [meal]: star }))}
+                                                            className={`transition-transform hover:scale-110 focus:outline-none ${star <= currentRating ? 'scale-110 drop-shadow-sm' : ''}`}
+                                                        >
+                                                            <Star
+                                                                size={32}
+                                                                className={`${star <= currentRating ? 'text-primary fill-primary' : 'text-zinc-600/30'} transition-transform duration-300`}
+                                                            />
+                                                        </button>
+                                                    ))}
+                                                </div>
                                             )}
                                         </div>
                                     );
                                 })}
                             </div>
+
+                            {/* Single Submit All button at the bottom */}
+                            {selectedDate === new Date().toLocaleDateString('en-CA') ? (() => {
+                                const pendingMeals = MEAL_ORDER.filter(m => isRatingAllowed(m) && ratings[m] && !submittedRatings[m]);
+                                return (
+                                    <div className="mt-6 pt-4 border-t border-black/5 dark:border-white/5">
+                                        {pendingMeals.length > 0 ? (
+                                            <Button
+                                                onClick={submitAllRatings}
+                                                disabled={submittingAll}
+                                                loading={submittingAll}
+                                                className="w-full py-4 text-base font-black"
+                                            >
+                                                {submittingAll ? 'Submitting...' : `Submit All Ratings (${pendingMeals.length} meal${pendingMeals.length > 1 ? 's' : ''})`}
+                                            </Button>
+                                        ) : (
+                                            <p className="text-center text-sm text-zinc-400 dark:text-zinc-500 font-medium">
+                                                {MEAL_ORDER.every(m => !isRatingAllowed(m) || submittedRatings[m]) ? (
+                                                    <span className="flex items-center justify-center gap-2 text-green-500"><CheckCircle2 size={16} /> All available meals rated!</span>
+                                                ) : (
+                                                    'Select star ratings above, then submit all at once'
+                                                )}
+                                            </p>
+                                        )}
+                                    </div>
+                                );
+                            })() : (
+                                <div className="mt-6 pt-4 border-t border-black/5 dark:border-white/5 text-center">
+                                    <p className="text-sm font-bold text-zinc-400 flex items-center justify-center gap-2">
+                                        <LockIcon size={14} /> Ratings are locked — you can only rate today's meals
+                                    </p>
+                                </div>
+                            )}
                         </Card>
                     </div>
                 )}
@@ -806,10 +876,34 @@ export const UserDashboard = ({ user, userData, onLogout, onSwitchToAdmin, canSw
                                         </button>
                                         <button
                                             onClick={() => updateSettings?.({ darkMode: true })}
-                                            className={`px-3 py-1 rounded-pill text-[10px] font-black uppercase tracking-widest transition-all ${settings?.darkMode ? 'bg-[#D4F000] text-[#0D0D0D] shadow-sm' : 'text-zinc-500'}`}
+                                            className={`px-3 py-1 rounded-pill text-[10px] font-black uppercase tracking-widest transition-all ${settings?.darkMode ? 'bg-primary text-dark shadow-sm' : 'text-zinc-500'}`}
                                         >
                                             Dark
                                         </button>
+                                    </div>
+                                </div>
+
+                                {/* Theme Selector Section */}
+                                <div className="p-4 bg-white dark:bg-slate-800 border border-black/5 dark:border-white/5 rounded-2xl shadow-sm space-y-3">
+                                    <span className="text-sm font-bold text-mid uppercase tracking-widest block">
+                                        Theme Color
+                                    </span>
+                                    <div className="grid grid-cols-5 gap-3">
+                                        {[
+                                            { id: 'orange', col: 'bg-orange-500' },
+                                            { id: 'blue', col: 'bg-blue-600' },
+                                            { id: 'green', col: 'bg-emerald-500' },
+                                            { id: 'purple', col: 'bg-purple-500' },
+                                            { id: 'indigo', col: 'bg-indigo-500' },
+                                        ].map(t => (
+                                            <button
+                                                key={t.id}
+                                                onClick={() => updateSettings?.({ theme: t.id })}
+                                                className={`h-10 rounded-xl transition-all border-2 ${settings.theme === t.id ? 'border-primary scale-110 shadow-md ring-2 ring-primary/20' : 'border-transparent opacity-60 hover:opacity-100'}`}
+                                            >
+                                                <div className={`w-full h-full rounded-lg ${t.col}`} title={t.id} />
+                                            </button>
+                                        ))}
                                     </div>
                                 </div>
 
@@ -1033,6 +1127,7 @@ export const UserDashboard = ({ user, userData, onLogout, onSwitchToAdmin, canSw
                 isOpen={isFeedbackOpen}
                 onClose={() => setIsFeedbackOpen(false)}
                 initialEmail={user?.email || ''}
+                config={config}
             />
 
             {/* Notification Modal */}

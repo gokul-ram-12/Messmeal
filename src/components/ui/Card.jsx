@@ -7,10 +7,10 @@ import React from 'react';
 export const Card = ({ children, className = "" }) => (
     <div className={[
         // Light mode
-        "bg-white rounded-card shadow-card border-0 p-5 sm:p-6",
+        "bg-white rounded-[2.5rem] shadow-card border-[4px] border-primary p-5 sm:p-8",
         "transition-all duration-300 hover:shadow-card-md",
         // Dark mode  
-        "dark:bg-[#1A1A1A] dark:rounded-card-xl dark:shadow-card-dark",
+        "dark:bg-[#1A1A1A] dark:rounded-[2.5rem] dark:shadow-card-dark dark:border-primary",
         className,
     ].join(' ')}>
         {children}

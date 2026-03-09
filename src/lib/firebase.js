@@ -1,7 +1,12 @@
 // src/lib/firebase.js
 import { initializeApp } from 'firebase/app';
 import { getAuth } from 'firebase/auth';
-import { getFirestore, enableIndexedDbPersistence } from 'firebase/firestore';
+import {
+    getFirestore,
+    initializeFirestore,
+    persistentLocalCache,
+    persistentMultipleTabManager
+} from 'firebase/firestore';
 import { getMessaging, isSupported } from 'firebase/messaging';
 
 const firebaseConfig = {
@@ -15,15 +20,21 @@ const firebaseConfig = {
 
 export const app = initializeApp(firebaseConfig);
 export const auth = getAuth(app);
-export const db = getFirestore(app);
-export const appId = 'messmeal-default';
 
-// Enable Offline Persistence
+// Initialize Firestore with persistent local cache (multi-tab safe)
+let dbInstance;
 try {
-    enableIndexedDbPersistence(db).catch(() => { });
+    dbInstance = initializeFirestore(app, {
+        localCache: persistentLocalCache({
+            tabManager: persistentMultipleTabManager()
+        })
+    });
 } catch {
-    // Ignore persistence errors
+    // Fallback to non-configured instance if environment does not support this API
+    dbInstance = getFirestore(app);
 }
+export const db = dbInstance;
+export const appId = 'messmeal-default';
 
 // Initialize Messaging conditionally (not supported in all browsers)
 export let messaging = null;

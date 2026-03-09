@@ -2,18 +2,21 @@ import React, { useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
 import { collection, query, onSnapshot, doc, updateDoc, setDoc, deleteDoc, serverTimestamp, writeBatch, getDocs, where, orderBy, limit, addDoc } from 'firebase/firestore';
 import { db, appId } from '../lib/firebase';
-import { LayoutDashboard, Users, Utensils, Megaphone, FileSpreadsheet, Settings, LogOut, Search, Check, X, Bell, Crown, Save, Calendar, BarChart3, ChevronRight, Menu as MenuIcon, AlertTriangle, Star, ImageIcon, Eye, Download, Shield, User, Clock4, PlusCircle, Trash2, RefreshCw, Globe, MessageSquare, CheckCircle2, Sparkles, ShieldAlert, ShieldCheck } from 'lucide-react';
+import { LayoutDashboard, Users, Utensils, Megaphone, FileSpreadsheet, Settings, LogOut, Search, Check, X, Bell, Crown, Save, Calendar, BarChart3, ChevronRight, Menu as MenuIcon, AlertTriangle, Star, ImageIcon, Eye, Download, Shield, User, Clock4, PlusCircle, Trash2, RefreshCw, Globe, MessageSquare, CheckCircle2, Sparkles, ShieldAlert, ShieldCheck, FileText, Menu } from 'lucide-react';
 import * as XLSX from 'xlsx';
 import { toast } from 'react-hot-toast';
+import { parseMenuCSV, uploadMenuBatch } from '../lib/menuUtils';
 
 import { Button } from './ui/Button';
 import { Card } from './ui/Card';
 import { Badge } from './ui/Badge';
+import { Select } from './ui/Select';
 import { OfflineIndicator } from './ui/OfflineIndicator';
 import { ConfirmModal } from './ui/ConfirmModal';
 import { ProfileSetupScreen } from './ProfileSetup';
 import { BouncingLogoScreen } from './ui/LoadingScreen';
 import { UnifiedFeedbackModal } from './UnifiedFeedbackModal';
+import { SuccessModal } from './ui/SuccessModal';
 import { DEFAULT_HOSTELS, DEFAULT_MESS_TYPES, MEAL_ORDER, INITIAL_SUPER_ADMIN_EMAIL, DEFAULT_TAGLINE, DEFAULT_MEAL_TIMINGS } from '../lib/constants';
 
 // Utility for CSV to Menu conversion
@@ -77,7 +80,7 @@ export const AdminDashboard = ({ user, userData, onLogout, onSwitchToUser, confi
 
     // Menu state
     const [menuInputs, setMenuInputs] = useState({ breakfast: '', lunch: '', snacks: '', dinner: '' });
-    const [menuDate, setMenuDate] = useState(new Date().toISOString().split('T')[0]);
+    const [menuDate, setMenuDate] = useState(new Date().toLocaleDateString('en-CA'));
     const [menuHostel, setMenuHostel] = useState(DEFAULT_HOSTELS[0]);
     const [menuType, setMenuType] = useState(DEFAULT_MESS_TYPES[0]);
 
@@ -109,6 +112,53 @@ export const AdminDashboard = ({ user, userData, onLogout, onSwitchToUser, confi
 
     // Custom confirm modal state
     const [confirmModal, setConfirmModal] = useState({ isOpen: false, title: '', message: '', onConfirm: () => { }, isDestructive: true });
+    const [successModal, setSuccessModal] = useState({ isOpen: false, title: '', message: '' });
+
+    const monthOptions = Array.from({ length: 12 }, (_, i) => ({
+        value: i,
+        label: new Date(2000, i).toLocaleString('default', { month: 'long' })
+    }));
+
+    const yearOptions = Array.from({ length: 5 }, (_, i) => {
+        const y = new Date().getFullYear() - 1 + i;
+        return { value: y, label: y.toString() };
+    });
+
+    const getHostelOptions = (includeAll = false) => {
+        const options = [];
+        if (includeAll) {
+            options.push({ value: 'ALL', label: 'All Hostels' });
+        }
+        if (config?.hostelGroups?.length > 0) {
+            options.push({
+                label: "Hostel Groups",
+                options: config.hostelGroups.map(g => ({ value: `GROUP:${g.name}`, label: g.name }))
+            });
+        }
+        options.push({
+            label: "Individuals",
+            options: (config?.hostels || DEFAULT_HOSTELS).map(h => ({ value: h, label: h }))
+        });
+        return options;
+    };
+
+    const getMessTypeOptions = (includeAll = false) => {
+        const options = [];
+        if (includeAll) {
+            options.push({ value: 'ALL', label: 'All Types' });
+        }
+        if (config?.messTypeGroups?.length > 0) {
+            options.push({
+                label: "Mess Groups",
+                options: config.messTypeGroups.map(g => ({ value: `GROUP:${g.name}`, label: g.name }))
+            });
+        }
+        options.push({
+            label: "Individuals",
+            options: (config?.messTypes || DEFAULT_MESS_TYPES).map(m => ({ value: m, label: m }))
+        });
+        return options;
+    };
 
     const isSuperAdmin = userData?.role === 'super_admin' ||
         user?.email === INITIAL_SUPER_ADMIN_EMAIL ||
@@ -204,15 +254,24 @@ export const AdminDashboard = ({ user, userData, onLogout, onSwitchToUser, confi
     };
 
     const addHostelGroup = async () => {
-        if (!newGroupName.trim() || newGroupHostels.length === 0) return;
+        const name = newGroupName.trim();
+        if (!name || newGroupHostels.length === 0) return;
         try {
             const currentGroups = config?.hostelGroups || [];
-            if (currentGroups.some(g => g.name.toLowerCase() === newGroupName.trim().toLowerCase())) {
+            if (currentGroups.some(g => g.name.toLowerCase() === name.toLowerCase())) {
                 toast.error("A group with this name already exists.");
                 return;
             }
-            const updatedGroups = [...currentGroups, { name: newGroupName.trim(), hostels: newGroupHostels }];
-            await setDoc(doc(db, 'artifacts', appId, 'config', 'settings'), { hostelGroups: updatedGroups }, { merge: true });
+            const updatedGroups = [...currentGroups, { name, hostels: newGroupHostels }];
+
+            // Trigger success modal BEFORE re-renders if possible, but definitely before state reset
+            setSuccessModal({
+                isOpen: true,
+                title: "Group Created!",
+                message: `Hostel group "${name}" has been successfully created.`
+            });
+
+            await onUpdateConfig({ hostelGroups: updatedGroups });
             setNewGroupName('');
             setNewGroupHostels([]);
             toast.success("Hostel group added!");
@@ -222,18 +281,26 @@ export const AdminDashboard = ({ user, userData, onLogout, onSwitchToUser, confi
     };
 
     const addMessTypeGroup = async () => {
-        if (!newMessGroupName.trim() || newMessGroupTypes.length === 0) return;
+        const name = newMessGroupName.trim();
+        if (!name || newMessGroupTypes.length === 0) return;
         try {
             const currentGroups = config?.messTypeGroups || [];
-            if (currentGroups.some(g => g.name.toLowerCase() === newMessGroupName.trim().toLowerCase())) {
+            if (currentGroups.some(g => g.name.toLowerCase() === name.toLowerCase())) {
                 toast.error("A group with this name already exists.");
                 return;
             }
-            const updatedGroups = [...currentGroups, { name: newMessGroupName.trim(), types: newMessGroupTypes }];
-            await setDoc(doc(db, 'artifacts', appId, 'config', 'settings'), { messTypeGroups: updatedGroups }, { merge: true });
+            const updatedGroups = [...currentGroups, { name, types: newMessGroupTypes }];
+
+            setSuccessModal({
+                isOpen: true,
+                title: "Group Created!",
+                message: `Mess group "${name}" has been successfully created.`
+            });
+
+            await onUpdateConfig({ messTypeGroups: updatedGroups });
             setNewMessGroupName('');
             setNewMessGroupTypes([]);
-            toast.success("Mess type group added!");
+            toast.success("Mess group added!");
         } catch (e) {
             toast.error("Failed to add mess type group.");
         }
@@ -244,6 +311,11 @@ export const AdminDashboard = ({ user, userData, onLogout, onSwitchToUser, confi
             const currentGroups = config?.hostelGroups || [];
             const updatedGroups = currentGroups.filter(g => g.name !== groupName);
             await setDoc(doc(db, 'artifacts', appId, 'config', 'settings'), { hostelGroups: updatedGroups }, { merge: true });
+            setSuccessModal({
+                isOpen: true,
+                title: "Group Deleted",
+                message: `The hostel group "${groupName}" has been successfully removed.`
+            });
             toast.success("Hostel group deleted!");
         } catch (e) {
             toast.error("Failed to delete group.");
@@ -255,6 +327,11 @@ export const AdminDashboard = ({ user, userData, onLogout, onSwitchToUser, confi
             const currentGroups = config?.messTypeGroups || [];
             const updatedGroups = currentGroups.filter(g => g.name !== groupName);
             await setDoc(doc(db, 'artifacts', appId, 'config', 'settings'), { messTypeGroups: updatedGroups }, { merge: true });
+            setSuccessModal({
+                isOpen: true,
+                title: "Group Deleted",
+                message: `The mess type group "${groupName}" has been successfully removed.`
+            });
             toast.success("Mess type group deleted!");
         } catch (e) {
             toast.error("Failed to delete group.");
@@ -264,6 +341,11 @@ export const AdminDashboard = ({ user, userData, onLogout, onSwitchToUser, confi
     const approveUser = async (userId) => {
         try {
             await updateDoc(doc(db, 'artifacts', appId, 'users', userId), { approved: true });
+            setSuccessModal({
+                isOpen: true,
+                title: "User Approved!",
+                message: "This user can now access the relevant portals and features."
+            });
             toast.success("User approved!");
         } catch { toast.error("Failed to approve user"); }
     };
@@ -278,7 +360,12 @@ export const AdminDashboard = ({ user, userData, onLogout, onSwitchToUser, confi
                 setConfirmModal(prev => ({ ...prev, isOpen: false }));
                 try {
                     await updateDoc(doc(db, 'artifacts', appId, 'users', userId), { approved: false });
-                    toast.success("User access revoked");
+                    setSuccessModal({
+                        isOpen: true,
+                        title: "Access Revoked!",
+                        message: "The user's access has been successfully restricted."
+                    });
+                    toast.success("User access revoked.");
                 } catch { toast.error("Failed to revoke access"); }
             }
         });
@@ -297,6 +384,11 @@ export const AdminDashboard = ({ user, userData, onLogout, onSwitchToUser, confi
             const data = await res.json();
             if (!res.ok) throw new Error(data.error || 'Error adding admin');
 
+            setSuccessModal({
+                isOpen: true,
+                title: "Admin Added!",
+                message: `User "${newAdminEmail}" has been granted admin privileges.`
+            });
             toast.success(data.message);
             setNewAdminEmail('');
         } catch (err) {
@@ -326,6 +418,11 @@ export const AdminDashboard = ({ user, userData, onLogout, onSwitchToUser, confi
                     const data = await res.json();
                     if (!res.ok) throw new Error(data.error || 'Error transferring ownership');
 
+                    setSuccessModal({
+                        isOpen: true,
+                        title: "Ownership Transferred!",
+                        message: `Super Admin privileges have been successfully transferred to "${newEmail}".`
+                    });
                     toast.success(data.message);
                 } catch (err) {
                     toast.error(err.message);
@@ -342,6 +439,12 @@ export const AdminDashboard = ({ user, userData, onLogout, onSwitchToUser, confi
                 mealTimings: editTimings,
                 updatedAt: serverTimestamp()
             }, { merge: true });
+            await onUpdateConfig({ mealTimings: editTimings });
+            setSuccessModal({
+                isOpen: true,
+                title: "Timings Updated!",
+                message: "Standard meal timings have been updated for all students."
+            });
             toast.success("Permanent timings updated successfully!");
         } catch (err) { toast.error("Error updating timings"); }
     };
@@ -360,8 +463,13 @@ export const AdminDashboard = ({ user, userData, onLogout, onSwitchToUser, confi
                 timingOverrides: updatedOverrides,
                 updatedAt: serverTimestamp()
             }, { merge: true });
-
+            await onUpdateConfig({ timingOverrides: updatedOverrides });
             setNewOverride({ mealType: 'Breakfast', startDate: '', endDate: '', start: '', end: '', label: '' });
+            setSuccessModal({
+                isOpen: true,
+                title: "Override Added!",
+                message: `Timing override for ${newOverride.mealType} has been successfully applied.`
+            });
             toast.success("Temporary override added!");
         } catch (err) { toast.error("Error adding override"); }
     };
@@ -373,18 +481,27 @@ export const AdminDashboard = ({ user, userData, onLogout, onSwitchToUser, confi
                 timingOverrides: updatedOverrides,
                 updatedAt: serverTimestamp()
             }, { merge: true });
+            await onUpdateConfig({ timingOverrides: updatedOverrides });
             toast.success("Override removed");
         } catch (err) { toast.error("Error removing override"); }
     };
 
     const addConfigItem = async (type) => {
-        const val = type === 'hostel' ? newHostel : newMessType;
-        if (!val.trim()) return;
+        const val = type === 'hostel' ? newHostel.trim().toUpperCase() : newMessType.trim().toUpperCase();
+        if (!val) return;
         try {
             const key = type === 'hostel' ? 'hostels' : 'messTypes';
             const currentArr = config?.[key] || (type === 'hostel' ? DEFAULT_HOSTELS : DEFAULT_MESS_TYPES);
-            const updated = [...new Set([...currentArr, val.trim().toUpperCase()])];
-            await setDoc(doc(db, 'artifacts', appId, 'config', 'settings'), { [key]: updated }, { merge: true });
+            const updated = [...new Set([...currentArr, val])];
+
+            // Set success modal BEFORE awaiting potentially disruptive re-renders
+            setSuccessModal({
+                isOpen: true,
+                title: "Item Added!",
+                message: `New ${type === 'hostel' ? 'Hostel' : 'Mess Type'} "${val}" has been added to the system configuration.`
+            });
+
+            await onUpdateConfig({ [key]: updated });
             if (type === 'hostel') setNewHostel('');
             else setNewMessType('');
             toast.success(`${type} added successfully!`);
@@ -403,7 +520,14 @@ export const AdminDashboard = ({ user, userData, onLogout, onSwitchToUser, confi
                     const key = type === 'hostel' ? 'hostels' : 'messTypes';
                     const currentArr = config?.[key] || (type === 'hostel' ? DEFAULT_HOSTELS : DEFAULT_MESS_TYPES);
                     const updated = currentArr.filter(i => i !== itemToDelete);
-                    await setDoc(doc(db, 'artifacts', appId, 'config', 'settings'), { [key]: updated }, { merge: true });
+
+                    setSuccessModal({
+                        isOpen: true,
+                        title: "Item Deleted",
+                        message: `"${itemToDelete}" has been successfully removed from ${type === 'hostel' ? 'hostels' : 'mess types'}.`
+                    });
+
+                    await onUpdateConfig({ [key]: updated });
                     toast.success(`${type} deleted.`);
                 } catch (e) { toast.error(`Failed to delete ${type}`); }
             }
@@ -414,6 +538,12 @@ export const AdminDashboard = ({ user, userData, onLogout, onSwitchToUser, confi
         if (!newTagline.trim()) return;
         try {
             await setDoc(doc(db, 'artifacts', appId, 'config', 'settings'), { tagline: newTagline.trim() }, { merge: true });
+            await onUpdateConfig({ tagline: newTagline.trim() });
+            setSuccessModal({
+                isOpen: true,
+                title: "Tagline Updated!",
+                message: `The institutional tagline has been updated to: "${newTagline}"`
+            });
             toast.success("Tagline updated successfully!");
         } catch (e) { toast.error("Failed to update tagline"); }
     };
@@ -423,6 +553,12 @@ export const AdminDashboard = ({ user, userData, onLogout, onSwitchToUser, confi
             const field = type === 'gemini' ? 'geminiApiKey' : 'calorieNinjasApiKey';
             const val = type === 'gemini' ? newApiKey.trim() : newCalorieApiKey.trim();
             await setDoc(doc(db, 'artifacts', appId, 'config', 'settings'), { [field]: val }, { merge: true });
+            await onUpdateConfig({ [field]: val });
+            setSuccessModal({
+                isOpen: true,
+                title: "API Key Updated!",
+                message: `${type === 'gemini' ? 'Gemini AI' : 'CalorieNinjas'} API key has been securely updated.`
+            });
             toast.success(`${type === 'gemini' ? 'Gemini' : 'CalorieNinjas'} API Key updated successfully!`);
         } catch (e) { toast.error("Failed to update API Key"); }
     };
@@ -431,12 +567,19 @@ export const AdminDashboard = ({ user, userData, onLogout, onSwitchToUser, confi
         try {
             const newValue = !autoApprove;
             await setDoc(doc(db, 'artifacts', appId, 'config', 'settings'), { autoApproveDomainUsers: newValue }, { merge: true });
+            await onUpdateConfig({ autoApproveDomainUsers: newValue });
             setAutoApprove(newValue);
+            setSuccessModal({
+                isOpen: true,
+                title: "Preference Updated!",
+                message: `Auto-approval for permitted domains is now ${newValue ? 'ENABLED' : 'DISABLED'}.`
+            });
             toast.success(`User auto-approval is now ${newValue ? 'Enabled' : 'Disabled'}`);
         } catch (e) { toast.error("Failed to update approval setting"); }
     };
 
     const getTargetHostels = (selection) => {
+        if (selection === 'ALL') return config?.hostels || DEFAULT_HOSTELS;
         if (selection.startsWith('GROUP:')) {
             const groupName = selection.split(':')[1];
             const group = (config?.hostelGroups || []).find(g => g.name === groupName);
@@ -445,8 +588,31 @@ export const AdminDashboard = ({ user, userData, onLogout, onSwitchToUser, confi
         return [selection];
     };
 
+    const getTargetMessTypes = (selection) => {
+        if (selection === 'ALL') return config?.messTypes || DEFAULT_MESS_TYPES;
+        if (selection.startsWith('GROUP:')) {
+            const groupName = selection.split(':')[1];
+            const group = (config?.messTypeGroups || []).find(g => g.name === groupName);
+            return group ? group.types : [];
+        }
+        return [selection];
+    };
+
+    const matchesSelection = (value, selection, groups, groupProperty) => {
+        if (selection === 'ALL') return true;
+        if (selection.startsWith('GROUP:')) {
+            const groupName = selection.split(':')[1];
+            const group = (groups || []).find(g => g.name === groupName);
+            if (!group) return false;
+            return group[groupProperty].includes(value);
+        }
+        return value === selection;
+    };
+
     const createNotice = async () => {
         if (!noticeTitle.trim() || !noticeMessage.trim()) return;
+        // Capture title before state reset for the modal message
+        const capturedTitle = noticeTitle.trim();
         try {
             // Flatten target hostels from selections
             let finalHostels = [];
@@ -456,21 +622,39 @@ export const AdminDashboard = ({ user, userData, onLogout, onSwitchToUser, confi
                 noticeHostels.forEach(h => {
                     finalHostels = [...finalHostels, ...getTargetHostels(h)];
                 });
-                finalHostels = [...new Set(finalHostels)]; // Unique
+                finalHostels = [...new Set(finalHostels)];
             }
+
+            // Flatten target mess types from selections
+            let finalMessTypes = [];
+            if (noticeMessTypes.includes('ALL')) {
+                finalMessTypes = ['ALL'];
+            } else {
+                noticeMessTypes.forEach(t => {
+                    finalMessTypes = [...finalMessTypes, ...getTargetMessTypes(t)];
+                });
+                finalMessTypes = [...new Set(finalMessTypes)];
+            }
+
+            // Show modal BEFORE any awaits that could trigger re-renders
+            setSuccessModal({
+                isOpen: true,
+                title: "Broadcast Published!",
+                message: `Your notice "${capturedTitle}" has been successfully sent to all target students.`
+            });
 
             await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'notices'), {
                 title: noticeTitle,
                 message: noticeMessage,
                 targetHostels: finalHostels,
-                targetMessTypes: noticeMessTypes,
+                targetMessTypes: finalMessTypes,
                 createdAt: serverTimestamp()
             });
             setNoticeTitle('');
             setNoticeMessage('');
             setNoticeHostels(['ALL']);
             setNoticeMessTypes(['ALL']);
-            toast.success("Notice created!");
+            toast.success("Notice published!");
         } catch (err) { toast.error("Error creating notice"); }
     };
 
@@ -484,6 +668,11 @@ export const AdminDashboard = ({ user, userData, onLogout, onSwitchToUser, confi
                 setConfirmModal(prev => ({ ...prev, isOpen: false }));
                 try {
                     await deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'notices', id));
+                    setSuccessModal({
+                        isOpen: true,
+                        title: "Notice Deleted",
+                        message: "The notice has been successfully removed and will no longer be visible to students."
+                    });
                     toast.success("Notice deleted");
                 } catch { toast.error("Failed to delete notice"); }
             }
@@ -492,21 +681,34 @@ export const AdminDashboard = ({ user, userData, onLogout, onSwitchToUser, confi
 
     const updateMenuSession = async (session) => {
         try {
-            const targets = getTargetHostels(menuHostel);
-            if (targets.length === 0) return toast.error("No valid hostels found in group");
+            const targetHostels = getTargetHostels(menuHostel);
+            const targetMessTypes = getTargetMessTypes(menuType);
 
-            for (const targetHostel of targets) {
-                const docId = `${targetHostel}_${menuType}_${menuDate}`;
-                const docRef = doc(db, 'artifacts', appId, 'public', 'data', 'menus', docId);
-                const data = {
-                    date: menuDate,
-                    hostel: targetHostel,
-                    messType: menuType,
-                    [session.toLowerCase()]: menuInputs[session.toLowerCase()],
-                    updatedAt: serverTimestamp(),
-                    updatedBy: user.uid
-                };
-                await setDoc(docRef, data, { merge: true });
+            if (targetHostels.length === 0 || targetMessTypes.length === 0) {
+                return toast.error("No valid targets found in selection");
+            }
+
+            // Show success modal immediately before the loop of writes
+            setSuccessModal({
+                isOpen: true,
+                title: "Menu Updated! ✓",
+                message: `Successfully updating ${session} for ${targetHostels.length} hostel(s) on ${menuDate}. Changes will reflect shortly.`
+            });
+
+            for (const hostel of targetHostels) {
+                for (const mType of targetMessTypes) {
+                    const docId = `${hostel}_${mType}_${menuDate}`;
+                    const docRef = doc(db, 'artifacts', appId, 'public', 'data', 'menus', docId);
+                    const data = {
+                        date: menuDate,
+                        hostel: hostel,
+                        messType: mType,
+                        [session.toLowerCase()]: menuInputs[session.toLowerCase()],
+                        updatedAt: serverTimestamp(),
+                        updatedBy: user.uid
+                    };
+                    await setDoc(docRef, data, { merge: true });
+                }
             }
             toast.success(`${session} updated successfully!`);
         } catch { toast.error(`Failed to update ${session}`); }
@@ -514,80 +716,42 @@ export const AdminDashboard = ({ user, userData, onLogout, onSwitchToUser, confi
 
     const processCSV = async () => {
         if (!csvFile) return;
+
+        const fileName = csvFile.name?.toLowerCase() || '';
+        if (!fileName.endsWith('.csv') && !fileName.endsWith('.xlsx')) {
+            toast.error("Please upload a .csv or .xlsx file.");
+            setCsvFile(null);
+            return;
+        }
+
         setUploadingMenu(true);
-        const batch = writeBatch(db);
-        const reader = new FileReader();
+        try {
+            const processedMenu = await parseMenuCSV(csvFile, csvMonth, csvYear);
 
-        reader.onload = async (e) => {
-            try {
-                const bstr = e.target.result;
-                const wb = XLSX.read(bstr, { type: 'binary' });
-                const wsname = wb.SheetNames[0];
-                const ws = wb.Sheets[wsname];
-                const data = XLSX.utils.sheet_to_json(ws, { header: 1 });
+            const targetHostels = getTargetHostels(uploadHostel);
+            const targetMessTypes = getTargetMessTypes(uploadMessType);
 
-                const targets = getTargetHostels(uploadHostel);
-                if (targets.length === 0) {
-                    setUploadingMenu(false);
-                    return toast.error("No valid hostels found");
-                }
-
-                let count = 0;
-
-                for (let i = 1; i < data.length; i++) {
-                    const row = data[i];
-                    if (!row || row.length < 5) continue;
-
-                    let dateObj;
-                    if (typeof row[0] === 'number' && row[0] > 1000) {
-                        dateObj = excelDateToJSDate(row[0]);
-                    } else {
-                        const dayOrStr = String(row[0]);
-                        const dayNum = parseInt(dayOrStr);
-                        if (!isNaN(dayNum) && dayNum >= 1 && dayNum <= 31 && dayOrStr.length <= 2) {
-                            dateObj = new Date(csvYear, csvMonth, dayNum);
-                        } else {
-                            dateObj = new Date(dayOrStr);
-                            if (isNaN(dateObj.getTime())) continue;
-                            dateObj.setFullYear(csvYear);
-                            dateObj.setMonth(csvMonth);
-                        }
-                    }
-
-                    // Fix timezone offset issues
-                    const adjustedDate = new Date(dateObj.getTime() - (dateObj.getTimezoneOffset() * 60000));
-                    const dateString = adjustedDate.toISOString().split('T')[0];
-
-                    targets.forEach(targetHostel => {
-                        const docId = `${targetHostel}_${uploadMessType}_${dateString}`;
-                        const docRef = doc(db, 'artifacts', appId, 'public', 'data', 'menus', docId);
-
-                        batch.set(docRef, {
-                            date: dateString,
-                            hostel: targetHostel,
-                            messType: uploadMessType,
-                            breakfast: row[1] || '',
-                            lunch: row[2] || '',
-                            snacks: row[3] || '',
-                            dinner: row[4] || '',
-                            updatedAt: serverTimestamp(),
-                            updatedBy: user.uid
-                        });
-                    });
-                    count++;
-                }
-
-                await batch.commit();
-                toast.success(`Successfully uploaded menu for  ${count} days (applied to ${targets.length} groups/hostels)!`);
-                setCsvFile(null);
-            } catch (error) {
-                console.error(error);
-                toast.error("Error parsing CSV or Excel file");
-            } finally {
+            if (targetHostels.length === 0 || targetMessTypes.length === 0) {
                 setUploadingMenu(false);
+                return toast.error("No valid targets found");
             }
-        };
-        reader.readAsBinaryString(csvFile);
+
+            const totalDocs = await uploadMenuBatch(processedMenu, targetHostels, targetMessTypes, user.uid);
+
+            // Show success modal before setCsvFile(null) to avoid any re-render race
+            setSuccessModal({
+                isOpen: true,
+                title: "Bulk Upload Complete! ✓",
+                message: `Successfully uploaded menu for ${targetHostels.length} hostel(s) and ${targetMessTypes.length} mess type(s). ${totalDocs} records created/updated.`
+            });
+            toast.success(`Menu uploaded! ${totalDocs} records updated.`);
+            setCsvFile(null);
+        } catch (error) {
+            console.error(error);
+            toast.error("Error parsing or uploading CSV/Excel file");
+        } finally {
+            setUploadingMenu(false);
+        }
     };
 
     const seedTemporaryMenu = async () => {
@@ -609,7 +773,7 @@ export const AdminDashboard = ({ user, userData, onLogout, onSwitchToUser, confi
             for (let d = 0; d < 7; d++) {
                 const date = new Date(today);
                 date.setDate(today.getDate() + d);
-                const dateString = date.toISOString().split('T')[0];
+                const dateString = date.toLocaleDateString('en-CA');
 
                 hostels.forEach(hostel => {
                     messTypes.forEach(type => {
@@ -628,6 +792,11 @@ export const AdminDashboard = ({ user, userData, onLogout, onSwitchToUser, confi
             }
 
             await batch.commit();
+            setSuccessModal({
+                isOpen: true,
+                title: "Menu Seeded!",
+                message: "Successfully seeded a 7-day sample menu for all hostels and mess types."
+            });
             toast.success("Successfully seeded 7-day sample menu for all hostels!");
         } catch (error) {
             console.error("Seeding error:", error);
@@ -640,6 +809,11 @@ export const AdminDashboard = ({ user, userData, onLogout, onSwitchToUser, confi
     const resolveProof = async (id) => {
         try {
             await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'proofs', id), { status: 'Resolved' });
+            setSuccessModal({
+                isOpen: true,
+                title: "Complaint Resolved!",
+                message: "The report has been marked as resolved in the system gallery."
+            });
             toast.success("Complaint marked as resolved");
         } catch { toast.error("Failed to resolve complaint"); }
     };
@@ -667,8 +841,8 @@ export const AdminDashboard = ({ user, userData, onLogout, onSwitchToUser, confi
 
     const filteredProofs = proofs.filter(p => {
         const matchesDate = !proofDateFilter || p.date === proofDateFilter;
-        const matchesMessType = proofMessTypeFilter === 'ALL' || p.messType === proofMessTypeFilter;
-        const matchesHostel = proofHostelFilter === 'ALL' || p.hostel === proofHostelFilter;
+        const matchesMessType = matchesSelection(p.messType, proofMessTypeFilter, config?.messTypeGroups, 'types');
+        const matchesHostel = matchesSelection(p.hostel, proofHostelFilter, config?.hostelGroups, 'hostels');
         return matchesDate && matchesMessType && matchesHostel;
     }).sort((a, b) => new Date(b.date) - new Date(a.date));
 
@@ -817,6 +991,11 @@ export const AdminDashboard = ({ user, userData, onLogout, onSwitchToUser, confi
                         lastRatingsReset: serverTimestamp()
                     }
                 });
+                setSuccessModal({
+                    isOpen: true,
+                    title: "Ratings Cleared!",
+                    message: `All ratings for the period ${maintenanceStatus.ratingsPeriod} have been backed up and cleared.`
+                });
                 toast.success("Ratings cleared successfully!");
             } else if (type === 'proofs') {
                 // Download CSV
@@ -826,14 +1005,8 @@ export const AdminDashboard = ({ user, userData, onLogout, onSwitchToUser, confi
                 if (data.length > 0) exportToExcel(data, `MessMeal_Proofs_Backup_${maintenanceStatus.proofsPeriod.replace(/ /g, '_')}`);
 
                 // Delete records AND Storage Files (simulated delete records)
-                // Note: Client-side storage delete requires individual files. 
-                // We'll iterate and try to delete, but primarily focus on doc deletion.
                 const batch = writeBatch(db);
-                snap.docs.forEach(d => {
-                    // If we had separate storage bucket delete logic here, it would go here.
-                    // For now, these are embedded images (base64) so doc delete clears storage.
-                    batch.delete(d.ref);
-                });
+                snap.docs.forEach(d => batch.delete(d.ref));
                 await batch.commit();
 
                 // Update config
@@ -842,6 +1015,11 @@ export const AdminDashboard = ({ user, userData, onLogout, onSwitchToUser, confi
                         ...maintenance,
                         lastProofsReset: serverTimestamp()
                     }
+                });
+                setSuccessModal({
+                    isOpen: true,
+                    title: "Proofs Cleared!",
+                    message: `All complaint proofs for the period ${maintenanceStatus.proofsPeriod} have been backed up and cleared.`
                 });
                 toast.success("Proofs cleared successfully!");
             }
@@ -852,6 +1030,7 @@ export const AdminDashboard = ({ user, userData, onLogout, onSwitchToUser, confi
             setShowBouncingLogo(false);
         }
     };
+
 
     const handleAllMaintenanceCleanup = async () => {
         if (!maintenanceStatus.ratingsResetNeeded && !maintenanceStatus.proofsResetNeeded) {
@@ -1020,47 +1199,36 @@ export const AdminDashboard = ({ user, userData, onLogout, onSwitchToUser, confi
                                 Expected Columns: Date, Breakfast, Lunch, Snacks, Dinner.
                             </p>
                             <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
-                                <div>
-                                    <label className="block text-[10px] font-bold text-success uppercase tracking-widest mb-2">Month</label>
-                                    <select value={csvMonth} onChange={(e) => setCsvMonth(Number(e.target.value))} className="w-full p-3 bg-zinc-100 dark:bg-black/40 border border-zinc-200 dark:border-success/30 rounded-xl outline-none focus:border-success focus:ring-2 focus:ring-success/20 text-zinc-900 dark:text-white transition-colors [&>option]:bg-white dark:[&>option]:bg-zinc-900">
-                                        {Array.from({ length: 12 }, (_, i) => (
-                                            <option key={i} value={i}>{new Date(2000, i).toLocaleString('default', { month: 'long' })}</option>
-                                        ))}
-                                    </select>
-                                </div>
-                                <div>
-                                    <label className="block text-[10px] font-bold text-success uppercase tracking-widest mb-2">Year</label>
-                                    <select value={csvYear} onChange={(e) => setCsvYear(Number(e.target.value))} className="w-full p-3 bg-zinc-100 dark:bg-black/40 border border-zinc-200 dark:border-success/30 rounded-xl outline-none focus:border-success focus:ring-2 focus:ring-success/20 text-zinc-900 dark:text-white transition-colors [&>option]:bg-white dark:[&>option]:bg-zinc-900">
-                                        {Array.from({ length: 5 }, (_, i) => new Date().getFullYear() - 1 + i).map(y => (
-                                            <option key={y} value={y}>{y}</option>
-                                        ))}
-                                    </select>
-                                </div>
-                                <div>
-                                    <label className="block text-[10px] font-bold text-success uppercase tracking-widest mb-2">Target</label>
-                                    <select value={uploadHostel} onChange={(e) => setUploadHostel(e.target.value)} className="w-full p-3 bg-zinc-100 dark:bg-black/40 border border-zinc-200 dark:border-success/30 rounded-xl outline-none focus:border-success focus:ring-2 focus:ring-success/20 text-zinc-900 dark:text-white transition-colors [&>option]:bg-white dark:[&>option]:bg-zinc-900">
-                                        {config?.hostelGroups?.length > 0 && (
-                                            <optgroup label="Hostel Groups">
-                                                {config.hostelGroups.map(g => <option key={g.name} value={`GROUP:${g.name}`}>{g.name}</option>)}
-                                            </optgroup>
-                                        )}
-                                        <optgroup label="Individuals">
-                                            {(config?.hostels || DEFAULT_HOSTELS).map(h => <option key={h} value={h}>{h}</option>)}
-                                        </optgroup>
-                                    </select>
-                                </div>
-                                <div>
-                                    <label className="block text-[10px] font-bold text-success uppercase tracking-widest mb-2">Mess Type</label>
-                                    <select value={uploadMessType} onChange={(e) => setUploadMessType(e.target.value)} className="w-full p-3 bg-zinc-100 dark:bg-black/40 border border-zinc-200 dark:border-success/30 rounded-xl outline-none focus:border-success focus:ring-2 focus:ring-success/20 text-zinc-900 dark:text-white transition-colors [&>option]:bg-white dark:[&>option]:bg-zinc-900">
-                                        {(config?.messTypes || DEFAULT_MESS_TYPES).map(m => <option key={m} value={m}>{m}</option>)}
-                                    </select>
-                                </div>
+                                <Select
+                                    label="Month"
+                                    value={csvMonth}
+                                    onChange={(val) => setCsvMonth(Number(val))}
+                                    options={monthOptions}
+                                />
+                                <Select
+                                    label="Year"
+                                    value={csvYear}
+                                    onChange={(val) => setCsvYear(Number(val))}
+                                    options={yearOptions}
+                                />
+                                <Select
+                                    label="Target"
+                                    value={uploadHostel}
+                                    onChange={setUploadHostel}
+                                    options={getHostelOptions()}
+                                />
+                                <Select
+                                    label="Mess Type"
+                                    value={uploadMessType}
+                                    onChange={setUploadMessType}
+                                    options={getMessTypeOptions()}
+                                />
                             </div>
                             <div className="flex flex-col sm:flex-row gap-4 items-center">
                                 <label className="flex-1 w-full flex items-center justify-center p-4 border border-dashed border-success/40 rounded-xl cursor-pointer hover:bg-success/10 dark:hover:bg-success/20 transition-colors bg-zinc-50 dark:bg-black/20 backdrop-blur-sm">
                                     <input
                                         type="file"
-                                        accept=".csv, .xlsx, .xls"
+                                        accept=".csv, .xlsx"
                                         onChange={(e) => setCsvFile(e.target.files[0])}
                                         className="hidden"
                                     />
@@ -1090,33 +1258,18 @@ export const AdminDashboard = ({ user, userData, onLogout, onSwitchToUser, confi
                                         className="w-full p-3 bg-zinc-100 dark:bg-black/40 border border-zinc-200 dark:border-white/10 rounded-xl outline-none focus:border-[#2E7D32] focus:ring-2 focus:ring-[#2E7D32]/20 text-zinc-900 dark:text-white transition-colors"
                                     />
                                 </div>
-                                <div>
-                                    <label className="block text-[10px] font-bold text-zinc-500 dark:text-zinc-400 uppercase tracking-widest mb-2">Target</label>
-                                    <select
-                                        value={menuHostel}
-                                        onChange={(e) => setMenuHostel(e.target.value)}
-                                        className="w-full p-3 bg-zinc-100 dark:bg-black/40 border border-zinc-200 dark:border-white/10 rounded-xl outline-none focus:border-[#2E7D32] focus:ring-2 focus:ring-[#2E7D32]/20 text-zinc-900 dark:text-white transition-colors [&>option]:bg-white dark:[&>option]:bg-zinc-900"
-                                    >
-                                        {config?.hostelGroups?.length > 0 && (
-                                            <optgroup label="Hostel Groups">
-                                                {config.hostelGroups.map(g => <option key={g.name} value={`GROUP:${g.name}`}>{g.name}</option>)}
-                                            </optgroup>
-                                        )}
-                                        <optgroup label="Individuals">
-                                            {(config?.hostels || DEFAULT_HOSTELS).map(h => <option key={h} value={h}>{h}</option>)}
-                                        </optgroup>
-                                    </select>
-                                </div>
-                                <div>
-                                    <label className="block text-[10px] font-bold text-zinc-500 dark:text-zinc-400 uppercase tracking-widest mb-2">Mess Type</label>
-                                    <select
-                                        value={menuType}
-                                        onChange={(e) => setMenuType(e.target.value)}
-                                        className="w-full p-3 bg-zinc-100 dark:bg-black/40 border border-zinc-200 dark:border-white/10 rounded-xl outline-none focus:border-[#2E7D32] focus:ring-2 focus:ring-[#2E7D32]/20 text-zinc-900 dark:text-white transition-colors [&>option]:bg-white dark:[&>option]:bg-zinc-900"
-                                    >
-                                        {(config?.messTypes || DEFAULT_MESS_TYPES).map(t => <option key={t} value={t}>{t}</option>)}
-                                    </select>
-                                </div>
+                                <Select
+                                    label="Target"
+                                    value={menuHostel}
+                                    onChange={setMenuHostel}
+                                    options={getHostelOptions()}
+                                />
+                                <Select
+                                    label="Mess Type"
+                                    value={menuType}
+                                    onChange={setMenuType}
+                                    options={getMessTypeOptions()}
+                                />
                             </div>
                             <div className="space-y-6">
                                 {MEAL_ORDER.map(meal => {
@@ -1126,14 +1279,19 @@ export const AdminDashboard = ({ user, userData, onLogout, onSwitchToUser, confi
                                         Snacks: 'bg-orange-500/10 border-orange-500/20 text-orange-400',
                                         Dinner: 'bg-purple-500/10 border-purple-500/20 text-purple-400'
                                     };
+                                    const mealBtnColors = {
+                                        Breakfast: 'bg-primary text-white hover:brightness-110 shadow-lg shadow-primary/20 border-primary/20',
+                                        Lunch: 'bg-green-600 text-white hover:bg-green-700 shadow-lg shadow-green-600/20 border-green-600/20',
+                                        Snacks: 'bg-orange-600 text-white hover:bg-orange-700 shadow-lg shadow-orange-600/20 border-orange-600/20',
+                                        Dinner: 'bg-purple-600 text-white hover:bg-purple-700 shadow-lg shadow-purple-600/20 border-purple-600/20'
+                                    };
                                     return (
                                         <div key={meal} className={`p-4 border rounded-2xl backdrop-blur-lg shadow-inner ${mealColors[meal]}`}>
                                             <div className="flex justify-between items-center mb-4">
                                                 <span className="font-heading font-semibold tracking-wide drop-shadow-sm">{meal}</span>
                                                 <Button
                                                     onClick={() => updateMenuSession(meal)}
-                                                    variant="secondary"
-                                                    className="text-xs py-1.5 px-4 bg-white/10 hover:bg-white/20 text-white border-white/20 backdrop-blur-sm"
+                                                    className={`text-xs py-2 px-5 font-black uppercase tracking-widest transition-all hover:scale-105 active:scale-95 ${mealBtnColors[meal]}`}
                                                     icon={Save}
                                                 >
                                                     Save {meal}
@@ -1163,8 +1321,8 @@ export const AdminDashboard = ({ user, userData, onLogout, onSwitchToUser, confi
                                 </Button>
                                 <p className="text-[9px] text-zinc-400 dark:text-zinc-500 mt-2 text-center italic">Useful for initial testing and demonstration</p>
                             </div>
-                        </Card>
-                    </div>
+                        </Card >
+                    </div >
                 );
 
             case 'notices': {
@@ -1367,22 +1525,18 @@ export const AdminDashboard = ({ user, userData, onLogout, onSwitchToUser, confi
                                         onChange={(e) => setFeedbackDateFilter(e.target.value)}
                                         className="flex-1 min-w-[120px] p-2 bg-zinc-50 dark:bg-black/40 border border-zinc-200 dark:border-white/10 rounded-xl text-xs outline-none focus:border-[#2E7D32]"
                                     />
-                                    <select
+                                    <Select
                                         value={feedbackHostelFilter}
-                                        onChange={(e) => setFeedbackHostelFilter(e.target.value)}
-                                        className="flex-1 min-w-[120px] p-2 bg-zinc-50 dark:bg-black/40 border border-zinc-200 dark:border-white/10 rounded-xl text-xs outline-none focus:border-[#2E7D32]"
-                                    >
-                                        <option value="ALL">All Hostels</option>
-                                        {(config?.hostels || DEFAULT_HOSTELS).map(h => <option key={h} value={h}>{h}</option>)}
-                                    </select>
-                                    <select
+                                        onChange={setFeedbackHostelFilter}
+                                        options={getHostelOptions(true)}
+                                        className="flex-1 min-w-[120px]"
+                                    />
+                                    <Select
                                         value={feedbackMessTypeFilter}
-                                        onChange={(e) => setFeedbackMessTypeFilter(e.target.value)}
-                                        className="flex-1 min-w-[120px] p-2 bg-zinc-50 dark:bg-black/40 border border-zinc-200 dark:border-white/10 rounded-xl text-xs outline-none focus:border-[#2E7D32]"
-                                    >
-                                        <option value="ALL">All Types</option>
-                                        {(config?.messTypes || DEFAULT_MESS_TYPES).map(t => <option key={t} value={t}>{t}</option>)}
-                                    </select>
+                                        onChange={setFeedbackMessTypeFilter}
+                                        options={getMessTypeOptions(true)}
+                                        className="flex-1 min-w-[120px]"
+                                    />
                                 </div>
                             </div>
                             <Button variant="secondary" onClick={() => exportToExcel(feedbacks, 'student_feedback')} disabled={feedbacks.length === 0} className="bg-zinc-100 dark:bg-white/10 text-zinc-900 dark:text-white border-zinc-200 dark:border-white/20 hover:bg-zinc-200 dark:hover:bg-white/20">
@@ -1395,8 +1549,8 @@ export const AdminDashboard = ({ user, userData, onLogout, onSwitchToUser, confi
                                 const fDate = (f.date || f.feedbackDate || '');
                                 const dateStr = fDate.length > 10 ? fDate.slice(0, 10) : fDate;
                                 const matchDate = !feedbackDateFilter || dateStr === feedbackDateFilter;
-                                const matchHostel = feedbackHostelFilter === 'ALL' || f.hostel === feedbackHostelFilter;
-                                const matchType = feedbackMessTypeFilter === 'ALL' || f.messType === feedbackMessTypeFilter;
+                                const matchHostel = matchesSelection(f.hostel, feedbackHostelFilter, config?.hostelGroups, 'hostels');
+                                const matchType = matchesSelection(f.messType, feedbackMessTypeFilter, config?.messTypeGroups, 'types');
                                 return matchDate && matchHostel && matchType;
                             }).map(f => (
                                 <Card key={f.id} className="flex flex-col bg-white dark:bg-[#16162A] border border-zinc-200 dark:border-white/10 hover:border-[#2E7D32]/30 transition-all shadow-sm">
@@ -1466,28 +1620,18 @@ export const AdminDashboard = ({ user, userData, onLogout, onSwitchToUser, confi
                                     className="w-full p-3 bg-zinc-50 dark:bg-black/40 border border-zinc-200 dark:border-white/10 rounded-xl text-sm outline-none focus:border-[#2E7D32] dark:focus:border-[#7C3AED] text-zinc-900 dark:text-white transition-all"
                                 />
                             </div>
-                            <div>
-                                <label className="block text-[10px] font-black text-zinc-500 dark:text-zinc-400 uppercase tracking-widest mb-2 ml-1">Filter by Hostel</label>
-                                <select
-                                    value={proofHostelFilter}
-                                    onChange={(e) => setProofHostelFilter(e.target.value)}
-                                    className="w-full p-3 bg-zinc-50 dark:bg-black/40 border border-zinc-200 dark:border-white/10 rounded-xl text-sm outline-none focus:border-[#2E7D32] dark:focus:border-[#7C3AED] text-zinc-900 dark:text-white transition-all [&>option]:bg-white dark:[&>option]:bg-zinc-900"
-                                >
-                                    <option value="ALL">All Hostels</option>
-                                    {(config?.hostels || DEFAULT_HOSTELS).map(h => <option key={h} value={h}>{h}</option>)}
-                                </select>
-                            </div>
-                            <div>
-                                <label className="block text-[10px] font-black text-zinc-500 dark:text-zinc-400 uppercase tracking-widest mb-2 ml-1">Filter by Mess</label>
-                                <select
-                                    value={proofMessTypeFilter}
-                                    onChange={(e) => setProofMessTypeFilter(e.target.value)}
-                                    className="w-full p-3 bg-zinc-50 dark:bg-black/40 border border-zinc-200 dark:border-white/10 rounded-xl text-sm outline-none focus:border-[#2E7D32] dark:focus:border-[#7C3AED] text-zinc-900 dark:text-white transition-all [&>option]:bg-white dark:[&>option]:bg-zinc-900"
-                                >
-                                    <option value="ALL">All Types</option>
-                                    {(config?.messTypes || DEFAULT_MESS_TYPES).map(t => <option key={t} value={t}>{t}</option>)}
-                                </select>
-                            </div>
+                            <Select
+                                label="Filter by Hostel"
+                                value={proofHostelFilter}
+                                onChange={setProofHostelFilter}
+                                options={getHostelOptions(true)}
+                            />
+                            <Select
+                                label="Filter by Mess"
+                                value={proofMessTypeFilter}
+                                onChange={setProofMessTypeFilter}
+                                options={getMessTypeOptions(true)}
+                            />
                             <div className="flex items-end">
                                 <Button
                                     variant="secondary"
@@ -2083,16 +2227,12 @@ export const AdminDashboard = ({ user, userData, onLogout, onSwitchToUser, confi
                                         </h4>
                                         <div className="bg-zinc-50 dark:bg-black/20 p-6 rounded-3xl border border-zinc-100 dark:border-white/5 space-y-6">
                                             <div className="grid grid-cols-1 sm:grid-cols-3 lg:grid-cols-6 gap-4">
-                                                <div className="space-y-1">
-                                                    <label className="text-[10px] font-bold text-zinc-500 uppercase">Meal</label>
-                                                    <select
-                                                        value={newOverride.mealType}
-                                                        onChange={(e) => setNewOverride(prev => ({ ...prev, mealType: e.target.value }))}
-                                                        className="w-full p-3 bg-white dark:bg-zinc-800 border border-zinc-200 dark:border-white/10 rounded-xl text-sm outline-none focus:border-[#2E7D32]"
-                                                    >
-                                                        {MEAL_ORDER.map(m => <option key={m} value={m}>{m}</option>)}
-                                                    </select>
-                                                </div>
+                                                <Select
+                                                    label="Meal"
+                                                    value={newOverride.mealType}
+                                                    onChange={(val) => setNewOverride(prev => ({ ...prev, mealType: val }))}
+                                                    options={MEAL_ORDER.map(m => ({ value: m, label: m }))}
+                                                />
                                                 <div className="space-y-1">
                                                     <label className="text-[10px] font-bold text-zinc-500 uppercase">Start Date</label>
                                                     <input
@@ -2233,8 +2373,7 @@ export const AdminDashboard = ({ user, userData, onLogout, onSwitchToUser, confi
 
                                                 demoDays.forEach(day => {
                                                     const dateObj = new Date(year, 2, day); // March is 2 (0-based)
-                                                    const adjustedDate = new Date(dateObj.getTime() - (dateObj.getTimezoneOffset() * 60000));
-                                                    const dateString = adjustedDate.toISOString().split('T')[0];
+                                                    const dateString = dateObj.toLocaleDateString('en-CA');
 
                                                     hostels.forEach(h => {
                                                         messTypes.forEach(m => {
@@ -2665,6 +2804,11 @@ export const AdminDashboard = ({ user, userData, onLogout, onSwitchToUser, confi
                 isOpen={isFeedbackOpen}
                 onClose={() => setIsFeedbackOpen(false)}
                 initialEmail={user?.email || ''}
+                config={config}
+            />
+            <SuccessModal
+                {...successModal}
+                onConfirm={() => setSuccessModal(prev => ({ ...prev, isOpen: false }))}
             />
         </div>
     );

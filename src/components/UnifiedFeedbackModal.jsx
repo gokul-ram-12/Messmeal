@@ -6,9 +6,16 @@ import { db, appId } from '../lib/firebase';
 import { collection, addDoc, serverTimestamp } from 'firebase/firestore';
 import { toast } from 'react-hot-toast';
 
-export const UnifiedFeedbackModal = ({ isOpen, onClose, initialEmail = '' }) => {
+import { DEFAULT_HOSTELS, DEFAULT_MESS_TYPES } from '../lib/constants';
+
+export const UnifiedFeedbackModal = ({ isOpen, onClose, initialEmail = '', config }) => {
+    const hostels = config?.hostels || DEFAULT_HOSTELS;
+    const messTypes = config?.messTypes || DEFAULT_MESS_TYPES;
+
     const [description, setDescription] = useState('');
     const [email, setEmail] = useState(initialEmail);
+    const [hostel, setHostel] = useState(hostels[0]);
+    const [messType, setMessType] = useState(messTypes[0]);
     const [proofImage, setProofImage] = useState(null);
     const [submitting, setSubmitting] = useState(false);
 
@@ -37,6 +44,8 @@ export const UnifiedFeedbackModal = ({ isOpen, onClose, initialEmail = '' }) => 
             await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'feedback_reports'), {
                 description,
                 email,
+                hostel,
+                messType,
                 proofImage,
                 status: 'pending',
                 createdAt: serverTimestamp()
@@ -77,6 +86,29 @@ export const UnifiedFeedbackModal = ({ isOpen, onClose, initialEmail = '' }) => 
                             placeholder="your@email.com"
                             className="w-full p-4 bg-black/20 dark:bg-black/40 border border-black/20 dark:border-white/10 rounded-xl outline-none focus:border-primary focus:ring-2 focus:ring-primary/20 transition-all text-dark dark:text-white placeholder-mid shadow-inner"
                         />
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-4">
+                        <div>
+                            <label className="block text-xs font-bold text-mid uppercase tracking-widest mb-2">Hostel</label>
+                            <select
+                                value={hostel}
+                                onChange={(e) => setHostel(e.target.value)}
+                                className="w-full p-4 bg-black/20 dark:bg-black/40 border border-black/20 dark:border-white/10 rounded-xl outline-none focus:border-primary text-dark dark:text-white appearance-none"
+                            >
+                                {hostels.map(h => <option key={h} value={h} className="bg-white dark:bg-[#1A1A2E]">{h}</option>)}
+                            </select>
+                        </div>
+                        <div>
+                            <label className="block text-xs font-bold text-mid uppercase tracking-widest mb-2">Mess Type</label>
+                            <select
+                                value={messType}
+                                onChange={(e) => setMessType(e.target.value)}
+                                className="w-full p-4 bg-black/20 dark:bg-black/40 border border-black/20 dark:border-white/10 rounded-xl outline-none focus:border-primary text-dark dark:text-white appearance-none"
+                            >
+                                {messTypes.map(t => <option key={t} value={t} className="bg-white dark:bg-[#1A1A2E]">{t}</option>)}
+                            </select>
+                        </div>
                     </div>
 
                     <div>
