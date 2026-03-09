@@ -1,0 +1,1071 @@
+import React, { useState, useEffect, useMemo } from 'react';
+import { motion } from 'framer-motion';
+import { collection, addDoc, query, where, onSnapshot, doc, setDoc, serverTimestamp, orderBy, limit } from 'firebase/firestore';
+import { db, appId } from '../lib/firebase';
+import { Utensils, User, LogOut, Camera, Shield, MessageSquare, Star, X, CheckCircle2, AlertTriangle, Clock4, Lock as LockIcon, Megaphone, RefreshCw, FileText, Image as ImageIcon, PlusCircle, Bell, BellOff, BellRing } from 'lucide-react';
+import { scheduleMealNotifications, clearMealNotifTimers, maybeNotifyNotice, getNotifPermission, requestNotifPermission } from '../lib/notificationService';
+import { format, getHours, getMinutes } from 'date-fns';
+import { toast } from 'react-hot-toast';
+
+import { Button } from './ui/Button';
+import { Card } from './ui/Card';
+import { Badge } from './ui/Badge';
+import { OfflineIndicator } from './ui/OfflineIndicator';
+import { BouncingLogoScreen } from './ui/LoadingScreen';
+import { DateStrip } from './DateStrip';
+import { MenuGrid } from './MenuGrid';
+import { WeeklyMenuGrid } from './WeeklyMenuGrid';
+import { ProfileSetupScreen } from './ProfileSetup';
+import { UnifiedFeedbackModal } from './UnifiedFeedbackModal';
+import { callGemini, callCalorieNinjas, getMealStatus, getTimeMinutes, compressImage } from '../lib/utils';
+import { DEFAULT_MEAL_TIMINGS, MEAL_ORDER, DEFAULT_RATING_WINDOW, DEFAULT_TAGLINE } from '../lib/constants';
+
+export const UserDashboard = ({ user, userData, onLogout, onSwitchToAdmin, canSwitchToAdmin, config, settings, updateSettings }) => {
+    const [activeTab, setActiveTab] = useState('menu');
+    const [viewType, setViewType] = useState('day'); // 'day' or 'week'
+    const [selectedDate, setSelectedDate] = useState(new Date().toLocaleDateString('en-CA'));
+    const [menu, setMenu] = useState(null);
+    const [isLoadingMenu, setIsLoadingMenu] = useState(true);
+    const [ratings, setRatings] = useState({});
+    const [submittedRatings, setSubmittedRatings] = useState({});
+    const [notices, setNotices] = useState([]);
+    const [nutritionTips, setNutritionTips] = useState({});
+    const [aiLoading, setAiLoading] = useState(null);
+    const [proofFiles, setProofFiles] = useState([]); // Array of strings (base64)
+    const [userActivity, setUserActivity] = useState([]);
+
+    const [complaintText, setComplaintText] = useState('');
+    const [complaintSession, setComplaintSession] = useState('Breakfast');
+    const [complaintDate, setComplaintDate] = useState(new Date().toLocaleDateString('en-CA'));
+    const [submitting, setSubmitting] = useState(false);
+    const [showProfileEdit, setShowProfileEdit] = useState(false);
+    const [showBouncingLogo, setShowBouncingLogo] = useState(false);
+    const [selectedImage, setSelectedImage] = useState(null);
+    const [isFeedbackOpen, setIsFeedbackOpen] = useState(false);
+    const [showNotices, setShowNotices] = useState(false);
+
+    // Notification preferences (persisted in localStorage per user)
+    const notifStorageKey = user?.uid ? `notifPrefs_${user.uid}` : null;
+    const [notifPrefs, setNotifPrefsRaw] = useState(() => {
+        if (!user?.uid) return { mealNotif: true, noticeNotif: true };
+        try {
+            const stored = localStorage.getItem(`notifPrefs_${user.uid}`);
+            return stored ? JSON.parse(stored) : { mealNotif: true, noticeNotif: true };
+        } catch { return { mealNotif: true, noticeNotif: true }; }
+    });
+
+    const setNotifPrefs = (updates) => {
+        const next = { ...notifPrefs, ...updates };
+        setNotifPrefsRaw(next);
+        if (notifStorageKey) localStorage.setItem(notifStorageKey, JSON.stringify(next));
+    };
+
+    const [systemNotifPermission, setSystemNotifPermission] = useState(() => getNotifPermission());
+
+    const isFaculty = userData?.role === 'faculty';
+    const theme = isFaculty ? 'purple' : 'orange';
+    const activeTimings = useMemo(() => {
+        // Base timings: Default -> Config Permanent
+        const base = { ...DEFAULT_MEAL_TIMINGS, ...(config?.mealTimings || {}) };
+
+        // Apply overrides for selectedDate
+        const overrides = config?.timingOverrides || [];
+        const activeOverrides = overrides.filter(o =>
+            selectedDate >= o.startDate && selectedDate <= o.endDate
+        );
+
+        const result = { ...base };
+        activeOverrides.forEach(o => {
+            if (result[o.mealType]) {
+                result[o.mealType] = { ...result[o.mealType], start: o.start, end: o.end, isOverride: true };
+            }
+        });
+
+        return result;
+    }, [config, selectedDate]);
+
+    // Fetch menu
+    useEffect(() => {
+        if (!userData?.hostel) return;
+
+        // Defer state updates to avoid synchronous cascading renders in effect
+        const timer = setTimeout(() => {
+            setIsLoadingMenu(true);
+            setMenu(null);
+        }, 0);
+
+        const q = query(
+            collection(db, 'artifacts', appId, 'public', 'data', 'menus'),
+            where('date', '==', selectedDate),
+            where('hostel', '==', userData.hostel),
+            where('messType', '==', userData.messType),
+            limit(1)
+        );
+        const unsub = onSnapshot(q, (snap) => {
+            if (!snap.empty) setMenu(snap.docs[0].data());
+            else setMenu(null);
+            setIsLoadingMenu(false);
+        }, (err) => {
+            console.error("Menu fetch error:", err);
+            setIsLoadingMenu(false);
+        });
+        return () => {
+            unsub();
+            clearTimeout(timer);
+        };
+    }, [selectedDate, userData?.hostel, userData?.messType]);
+
+    // Fetch ratings
+    useEffect(() => {
+        if (!user?.uid || activeTab !== 'feedback') return;
+        const q = query(
+            collection(db, 'artifacts', appId, 'public', 'data', 'ratings'),
+            where('studentId', '==', user.uid),
+            where('date', '==', selectedDate)
+        );
+        const unsub = onSnapshot(q, (snap) => {
+            const userRatings = {};
+            snap.docs.forEach(doc => {
+                const data = doc.data();
+                userRatings[data.mealType] = { id: doc.id, ...data };
+            });
+            setSubmittedRatings(userRatings);
+        }, (err) => console.error("Ratings fetch error:", err));
+        return () => unsub();
+    }, [user?.uid, selectedDate, activeTab]);
+
+    // Fetch notices
+    useEffect(() => {
+        if (!userData?.hostel) return;
+        const q = query(collection(db, 'artifacts', appId, 'public', 'data', 'notices'), orderBy('createdAt', 'desc'), limit(20));
+        const unsub = onSnapshot(q, (snap) => {
+            const allNotices = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+            const relevant = allNotices.filter(n => {
+                const targetHostels = n.targetHostels || [n.hostel] || ['ALL'];
+                const targetMessTypes = n.targetMessTypes || [n.messType] || ['ALL'];
+                return (targetHostels.includes('ALL') || targetHostels.includes(userData.hostel)) &&
+                    (targetMessTypes.includes('ALL') || targetMessTypes.includes(userData.messType));
+            });
+            setNotices(relevant);
+            // Fire notice notifications for relevant new notices
+            relevant.forEach(notice => maybeNotifyNotice(notice, notifPrefs));
+        }, (err) => console.error("Notices fetch error:", err));
+
+        return () => unsub();
+    }, [userData?.hostel, userData?.messType]);
+
+
+    // Fetch user-specific complaints/proofs
+    useEffect(() => {
+        if (!user?.uid || activeTab !== 'complaints') return;
+        const q = query(
+            collection(db, 'artifacts', appId, 'public', 'data', 'proofs'),
+            where('studentId', '==', user.uid),
+            orderBy('createdAt', 'desc'),
+            limit(15)
+        );
+        const unsub = onSnapshot(q, (snap) => {
+            setUserActivity(snap.docs.map(d => ({ id: d.id, ...d.data() })));
+        }, (err) => console.error("Activity fetch error:", err));
+        return () => unsub();
+    }, [user?.uid, activeTab]);
+
+    // ── Schedule meal-time notifications whenever menu or timings change ──
+    useEffect(() => {
+        const todayStr = new Date().toLocaleDateString('en-CA');
+        if (selectedDate !== todayStr) return; // Only schedule for today
+        if (!menu) return;
+        scheduleMealNotifications({ activeTimings, menu, notifPrefs });
+        return () => clearMealNotifTimers();
+    }, [menu, activeTimings, notifPrefs, selectedDate]);
+
+    // ── Request notification permission once after login (if never asked) ──
+    useEffect(() => {
+        if (!user) return;
+        const alreadyAsked = localStorage.getItem(`notifAsked_${user.uid}`);
+        if (!alreadyAsked && getNotifPermission() === 'default') {
+            // Delay to not block the page load
+            const t = setTimeout(async () => {
+                const result = await requestNotifPermission();
+                setSystemNotifPermission(result);
+                localStorage.setItem(`notifAsked_${user.uid}`, '1');
+            }, 3000);
+            return () => clearTimeout(t);
+        }
+    }, [user]);
+
+    // ── Midnight ratings reset: unlock when midnight passes ──
+    useEffect(() => {
+        const tick = () => {
+            const now = new Date();
+            if (now.getHours() === 0 && now.getMinutes() === 0) {
+                setRatings({});
+                setSubmittedRatings({});
+                setSelectedDate(new Date().toLocaleDateString('en-CA'));
+            }
+        };
+        const interval = setInterval(tick, 60000); // check every minute
+        return () => clearInterval(interval);
+    }, []);
+
+    const submitRating = async (meal) => {
+        const rating = ratings[meal];
+        if (!rating) return;
+        setSubmitting(true);
+        try {
+            await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'ratings'), {
+                studentId: user.uid,
+                studentName: userData.name,
+                hostel: userData.hostel,
+                messType: userData.messType,
+                date: selectedDate,
+                mealType: meal,
+                rating,
+                createdAt: serverTimestamp()
+            });
+            setRatings(prev => ({ ...prev, [meal]: 0 }));
+            toast.success(`${meal} rating submitted!`);
+        } catch {
+            toast.error("Failed to submit rating");
+        }
+        setSubmitting(false);
+    };
+
+    const handleImageUpload = async (e) => {
+        const files = Array.from(e.target.files);
+        if (proofFiles.length + files.length > 5) {
+            return toast.error("Maximum 5 files allowed");
+        }
+
+        const newFiles = [];
+        for (const file of files) {
+            try {
+                if (file.type.startsWith('image/')) {
+                    const compressed = await compressImage(file);
+                    newFiles.push(compressed);
+                } else if (file.name.endsWith('.zip') || file.type === 'application/zip') {
+                    if (file.size > 2 * 1024 * 1024) {
+                        toast.error(`${file.name} is too large (>2MB)`);
+                        continue;
+                    }
+                    const base64 = await new Promise((resolve) => {
+                        const reader = new FileReader();
+                        reader.onload = () => resolve(reader.result);
+                        reader.readAsDataURL(file);
+                    });
+                    newFiles.push(base64);
+                } else {
+                    toast.error(`Unsupported file type: ${file.name}`);
+                }
+            } catch (err) {
+                console.error("Upload error:", err);
+                toast.error(`Error processing ${file.name}`);
+            }
+        }
+        setProofFiles(prev => [...prev, ...newFiles]);
+    };
+
+    const removeProofFile = (index) => {
+        setProofFiles(prev => prev.filter((_, i) => i !== index));
+    };
+
+    const submitComplaint = async () => {
+        if (!complaintText.trim() && proofFiles.length === 0) return toast.error("Please provide details or upload an image");
+        setSubmitting(true);
+        try {
+            await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'proofs'), {
+                studentId: user.uid,
+                studentName: userData.name,
+                hostel: userData.hostel,
+                messType: userData.messType,
+                date: complaintDate,
+                session: complaintSession,
+                description: complaintText,
+                images: proofFiles, // Store as an array now
+                status: 'Pending',
+                createdAt: serverTimestamp()
+            });
+            setComplaintText('');
+            setProofFiles([]);
+            toast.success("Complaint submitted successfully!");
+        } catch {
+            toast.error("Failed to submit complaint");
+        }
+        setSubmitting(false);
+    };
+
+    const handleNutritionAnalysis = async (meal, menuText) => {
+        setAiLoading(meal);
+        // Use CalorieNinjas for primary nutrition data
+        const result = await callCalorieNinjas(menuText, config?.calorieNinjasApiKey);
+        if (result) setNutritionTips(prev => ({ ...prev, [meal]: result }));
+        setAiLoading(null);
+    };
+
+    const updateProfile = async (updates) => {
+        setShowBouncingLogo(true);
+        await setDoc(doc(db, 'artifacts', appId, 'users', user.uid), { ...updates, updatedAt: serverTimestamp() }, { merge: true });
+        toast.success("Profile updated!");
+    };
+
+    const handleBouncingLogoComplete = () => {
+        setShowBouncingLogo(false);
+        setShowProfileEdit(false);
+    };
+
+    const isRatingAllowed = (meal) => {
+        const timing = activeTimings[meal];
+        if (!timing) return false;
+        const selected = new Date(selectedDate);
+        const today = new Date();
+        today.setHours(0, 0, 0, 0);
+        selected.setHours(0, 0, 0, 0);
+
+        // Future dates are never allowed
+        if (selected > today) return false;
+
+        // If today — locked before meal starts AND after midnight (00:00–meal start)
+        if (selected.getTime() === today.getTime()) {
+            const now = new Date();
+            const currentMinutes = now.getHours() * 60 + now.getMinutes();
+            const startMinutes = getTimeMinutes(timing.start);
+            const endMinutes = getTimeMinutes(timing.end);
+            // Locked from 00:00 until meal start; open from meal start onwards (including after end)
+            return currentMinutes >= startMinutes;
+        }
+
+        // Past dates allowed if within the rating window (e.g., 48 hours)
+        const diffHours = (today - selected) / (1000 * 60 * 60);
+        return diffHours <= (config?.ratingWindow || DEFAULT_RATING_WINDOW);
+    };
+
+    if (showBouncingLogo) {
+        return <BouncingLogoScreen onComplete={handleBouncingLogoComplete} />;
+    }
+
+    if (showProfileEdit) {
+        return <ProfileSetupScreen user={user} userData={userData} onComplete={updateProfile} theme={theme} />;
+    }
+
+    return (
+        <div className="min-h-screen w-full bg-page text-dark dark:text-white relative overflow-hidden selection:bg-primary/20">
+
+            <OfflineIndicator />
+
+            {/* ── HEADER ─────────────────────────────────────────────── */}
+            <header className="sticky top-0 z-40 bg-white dark:bg-[#0D0D0D] border-b border-[#E4E4E4] dark:border-[#2A2A2A] px-4 py-3 shadow-card">
+                <div className="max-w-7xl mx-auto flex justify-between items-center">
+                    <div className="flex items-center gap-3">
+                        <motion.img
+                            layoutId="logo"
+                            src="/pwa.png"
+                            alt="Logo"
+                            className="w-9 h-9 rounded-xl object-contain"
+                            onError={(e) => { e.target.src = '/pwa-512x512.png'; }}
+                        />
+                        <div>
+                            <h1 className="text-xl tracking-tight text-[#0D0D0D] dark:text-white leading-none">
+                                <span className="font-brand-mess font-bold text-[#0057FF] dark:text-white">Mess</span>
+                                <span className="font-brand-meal text-[#0057FF] dark:text-[#D4F000]">Meal</span>
+                            </h1>
+                            <p className="inline-block text-[7px] font-black uppercase tracking-[0.15em] text-[#0057FF] bg-[#0057FF]/10 px-1.5 py-0.4 rounded -mt-0.5 opacity-100 leading-none">eat on time be on time</p>
+                            <p className="text-[10px] text-[#6B6B6B] dark:text-[#A0A0A0] font-medium">{userData?.hostel} · {userData?.messType}</p>
+                        </div>
+                    </div>
+                    <div className="flex items-center gap-2">
+                        {canSwitchToAdmin && (
+                            <button
+                                onClick={onSwitchToAdmin}
+                                className="bg-[#F0F0F0] hover:bg-[#E4E4E4] dark:bg-[#2A2A2A] dark:hover:bg-[#333] border border-[#E4E4E4] dark:border-[#2A2A2A] px-3 py-1.5 rounded-xl dark:rounded-pill flex items-center gap-1.5 text-xs font-bold transition-all text-[#0D0D0D] dark:text-white"
+                            >
+                                <Shield size={14} className="text-[#0057FF] dark:text-[#D4F000]" /> <span className="hidden sm:inline">Admin</span>
+                            </button>
+                        )}
+                        <button
+                            onClick={() => setShowNotices(true)}
+                            className="bg-[#F0F0F0] hover:bg-[#E4E4E4] dark:bg-[#2A2A2A] dark:hover:bg-[#333] border border-[#E4E4E4] dark:border-[#2A2A2A] p-2 rounded-xl dark:rounded-pill transition-all text-[#6B6B6B] dark:text-[#A0A0A0] relative"
+                            title="Notices"
+                        >
+                            <Bell size={16} />
+                            {notices.length > 0 && (
+                                <span className="absolute top-1.5 right-1.5 w-2 h-2 bg-primary rounded-full border-2 border-white dark:border-[#0D0D0D]"></span>
+                            )}
+                        </button>
+                        <button onClick={() => window.location.reload()} className="bg-[#F0F0F0] hover:bg-[#E4E4E4] dark:bg-[#2A2A2A] dark:hover:bg-[#333] border border-[#E4E4E4] dark:border-[#2A2A2A] p-2 rounded-xl dark:rounded-pill transition-all text-[#6B6B6B] dark:text-[#A0A0A0]" title="Reload App">
+                            <RefreshCw size={16} />
+                        </button>
+                        <button
+                            onClick={onLogout}
+                            className="bg-[#F0F0F0] hover:bg-[#E4E4E4] dark:bg-[#2A2A2A] dark:hover:bg-[#333] border border-[#E4E4E4] dark:border-[#2A2A2A] p-2 rounded-xl dark:rounded-pill transition-all text-[#6B6B6B] dark:text-[#A0A0A0] hover:text-error dark:hover:text-error"
+                        >
+                            <LogOut size={16} />
+                        </button>
+                    </div>
+                </div>
+            </header>
+
+            <main className="max-w-7xl mx-auto p-4 pt-8 pb-32">
+                {activeTab === 'menu' && (
+                    <div className="space-y-8">
+                        {notices.length > 0 && notices.map(notice => (
+                            <div key={notice.id} className="bg-warning/5 border-l-4 border-warning p-4 rounded-card dark:rounded-card-xl relative overflow-hidden shadow-card dark:shadow-card-dark">
+                                <div className="flex items-start gap-3">
+                                    <div className="bg-warning/20 p-2.5 rounded-xl flex-shrink-0">
+                                        <Megaphone className="text-warning" size={20} />
+                                    </div>
+                                    <div>
+                                        <h4 className="font-heading font-black text-[#0D0D0D] dark:text-white text-base tracking-tight mb-1">{notice.title}</h4>
+                                        <p className="text-sm text-[#6B6B6B] dark:text-[#A0A0A0] leading-relaxed max-w-2xl">{notice.message}</p>
+                                    </div>
+                                </div>
+                            </div>
+                        ))}
+                        <div className="flex justify-end mb-4">
+                            <div className="bg-[#F0F0F0] dark:bg-[#1A1A1A] border border-[#E4E4E4] dark:border-[#2A2A2A] p-1 rounded-pill inline-flex">
+                                <button
+                                    onClick={() => setViewType('day')}
+                                    className={`px-5 py-2 rounded-pill text-sm font-bold transition-all duration-200 ${viewType === 'day'
+                                        ? 'bg-[#0057FF] text-white dark:bg-[#D4F000] dark:text-[#0D0D0D] shadow-sm'
+                                        : 'text-[#6B6B6B] dark:text-[#A0A0A0] hover:text-[#0D0D0D] dark:hover:text-white'
+                                        }`}
+                                >
+                                    Day View
+                                </button>
+                                <button
+                                    onClick={() => setViewType('week')}
+                                    className={`px-5 py-2 rounded-pill text-sm font-bold transition-all duration-200 ${viewType === 'week'
+                                        ? 'bg-[#0057FF] text-white dark:bg-[#D4F000] dark:text-[#0D0D0D] shadow-sm'
+                                        : 'text-[#6B6B6B] dark:text-[#A0A0A0] hover:text-[#0D0D0D] dark:hover:text-white'
+                                        }`}
+                                >
+                                    Week View
+                                </button>
+                            </div>
+                        </div>
+
+                        {viewType === 'day' ? (
+                            <>
+                                <DateStrip selectedDate={selectedDate} onSelectDate={setSelectedDate} theme={theme} />
+                                <MenuGrid
+                                    menu={menu}
+                                    isLoading={isLoadingMenu}
+                                    activeTimings={activeTimings}
+                                    selectedDateStr={selectedDate}
+                                    nutritionTips={nutritionTips}
+                                    onAnalyze={handleNutritionAnalysis}
+                                    aiLoading={aiLoading}
+                                    theme={theme}
+                                />
+                            </>
+                        ) : (
+                            <WeeklyMenuGrid userData={userData} theme={theme} />
+                        )}
+                    </div>
+                )}
+
+                {activeTab === 'feedback' && (
+                    <div className="w-full max-w-4xl mx-auto space-y-6 animate-fade-in mt-4 pb-24">
+                        <Card>
+                            <h3 className="text-xl font-heading font-semibold text-dark dark:text-white mb-6 tracking-tight flex items-center justify-between">
+                                <span className="flex items-center gap-3"><Star className="text-primary fill-primary" size={24} /> Rate Today's Meals</span>
+                            </h3>
+
+                            <div className="space-y-4">
+                                {MEAL_ORDER.map((meal) => {
+                                    const allowed = isRatingAllowed(meal);
+                                    let message = "";
+                                    if (!allowed) {
+                                        const now = new Date();
+                                        const sel = new Date(selectedDate);
+                                        now.setHours(0, 0, 0, 0); sel.setHours(0, 0, 0, 0);
+                                        if (sel > now) message = "Upcoming";
+                                        else if (sel < now) message = "Expired";
+                                        else message = "Not Started";
+                                    }
+
+                                    const currentRating = ratings[meal] || 0;
+                                    const hasSubmitted = submittedRatings[meal];
+
+                                    return (
+                                        <div key={meal} className={`p-5 rounded-[24px] border transition-all duration-500 ${hasSubmitted ? 'bg-primary/20 border-primary shadow-[0_0_20px_rgba(var(--color-primary),0.2)]' :
+                                            !allowed ? 'bg-zinc-100 dark:bg-black/20 border-zinc-200 dark:border-white/5 opacity-60' :
+                                                'bg-white dark:bg-page border-zinc-200 dark:border-white/10 shadow-sm hover:shadow-md'
+                                            }`}>
+                                            <div className="flex items-center justify-between mb-4">
+                                                <h4 className="font-heading font-black text-dark dark:text-white tracking-tight text-lg">{meal}</h4>
+                                                {!allowed && !hasSubmitted && (
+                                                    <span className={`text-[10px] font-black uppercase tracking-[0.2em] px-3 py-1.5 rounded-xl border shadow-sm ${message === 'Upcoming' ? 'bg-[#0057FF]/10 text-[#0057FF] border-[#0057FF]/20' :
+                                                        message === 'Expired' ? 'bg-zinc-500/10 text-zinc-500 border-zinc-500/20' :
+                                                            'bg-amber-500/10 text-amber-500 border-amber-500/20 shadow-amber-500/5'
+                                                        }`}>
+                                                        {message}
+                                                    </span>
+                                                )}
+                                                {hasSubmitted && <span className="text-[10px] text-primary font-black px-3 py-1.5 rounded-xl bg-primary/20 flex items-center gap-1.5 uppercase tracking-widest"><CheckCircle2 size={12} /> Rated {hasSubmitted.rating}/5</span>}
+                                            </div>
+
+                                            {!hasSubmitted && allowed && (
+                                                <>
+                                                    <div className="flex gap-2 justify-center mb-3">
+                                                        {[1, 2, 3, 4, 5].map((star) => (
+                                                            <button
+                                                                key={star}
+                                                                onClick={() => setRatings(prev => ({ ...prev, [meal]: star }))}
+                                                                className={`transition-transform hover:scale-110 focus:outline-none ${star <= currentRating ? 'scale-110 drop-shadow-sm' : ''}`}
+                                                            >
+                                                                <Star
+                                                                    size={32}
+                                                                    className={`${star <= currentRating ? 'text-primary fill-primary' : 'text-zinc-600/30'} transition-transform duration-300`}
+                                                                />
+                                                            </button>
+                                                        ))}
+                                                    </div>
+                                                    <Button
+                                                        onClick={() => submitRating(meal)}
+                                                        disabled={!currentRating || submitting}
+                                                        className="w-full text-sm py-2.5"
+                                                        loading={submitting}
+                                                    >
+                                                        Submit Rating
+                                                    </Button>
+                                                </>
+                                            )}
+                                        </div>
+                                    );
+                                })}
+                            </div>
+                        </Card>
+                    </div>
+                )}
+
+                {activeTab === 'complaints' && (
+                    <div className="w-full max-w-4xl mx-auto space-y-6 animate-fade-in mt-4 pb-24">
+                        <Card>
+                            <h3 className="text-xl font-heading font-semibold text-dark dark:text-white mb-6 tracking-tight flex items-center gap-3">
+                                <Camera className="text-primary" size={24} /> Add Food Proof
+                            </h3>
+                            <div className="space-y-4">
+                                <div>
+                                    <label className="text-xs font-bold text-zinc-500 uppercase tracking-widest mb-1 block">Session</label>
+                                    <select
+                                        value={complaintSession}
+                                        onChange={(e) => setComplaintSession(e.target.value)}
+                                        className="w-full border border-black/10 dark:border-white/10 rounded-xl p-3 bg-page focus:outline-none focus:ring-2 focus:ring-primary/50 text-dark dark:text-white font-medium appearance-none"
+                                    >
+                                        {MEAL_ORDER.map(m => <option key={m} value={m} className="bg-zinc-900">{m}</option>)}
+                                    </select>
+                                </div>
+                                <div>
+                                    <label className="text-xs font-bold text-zinc-500 uppercase tracking-widest mb-1 block">Date</label>
+                                    <input
+                                        type="date"
+                                        value={complaintDate}
+                                        onChange={(e) => setComplaintDate(e.target.value)}
+                                        max={new Date().toISOString().split('T')[0]}
+                                        className="w-full border border-black/10 dark:border-white/10 rounded-xl p-3 bg-page focus:outline-none focus:ring-2 focus:ring-primary/50 text-dark dark:text-white font-medium"
+                                        style={{ colorScheme: 'dark' }}
+                                    />
+                                </div>
+                                <div>
+                                    <label className="text-xs font-bold text-zinc-500 uppercase tracking-widest mb-1 block">Description</label>
+                                    <textarea
+                                        value={complaintText}
+                                        onChange={(e) => setComplaintText(e.target.value)}
+                                        placeholder="Describe the issue with the food..."
+                                        rows={3}
+                                        className="w-full border border-black/10 dark:border-white/10 rounded-xl p-3 bg-page focus:outline-none focus:ring-2 focus:ring-primary/50 text-dark dark:text-white placeholder-zinc-500 resize-none font-medium"
+                                    />
+                                </div>
+                                <div>
+                                    <label className="text-xs font-bold text-zinc-500 uppercase tracking-widest mb-3 block">Photo / File Proof (Max 5)</label>
+
+                                    <div className="flex gap-3 mb-4">
+                                        {/* Camera Capture */}
+                                        <div className="flex-1 relative group">
+                                            <input
+                                                type="file"
+                                                accept="image/*"
+                                                capture="environment"
+                                                onChange={handleImageUpload}
+                                                className="absolute inset-0 w-full h-full opacity-0 cursor-pointer z-10"
+                                                title="Take a photo"
+                                            />
+                                            <div className="bg-primary/10 hover:bg-primary/20 border border-primary/30 rounded-2xl py-6 flex flex-col items-center justify-center transition-all group-hover:scale-[1.02]">
+                                                <Camera size={28} className="text-primary mb-2" />
+                                                <span className="text-[10px] font-black uppercase tracking-tighter text-primary">Snap Photo</span>
+                                            </div>
+                                        </div>
+
+                                        {/* Gallery Picker */}
+                                        <div className="flex-1 relative group">
+                                            <input
+                                                type="file"
+                                                accept="image/*,.zip"
+                                                multiple
+                                                onChange={handleImageUpload}
+                                                className="absolute inset-0 w-full h-full opacity-0 cursor-pointer z-10"
+                                                title="Pick from gallery"
+                                            />
+                                            <div className="bg-zinc-800/50 hover:bg-zinc-800 border border-white/5 rounded-2xl py-6 flex flex-col items-center justify-center transition-all group-hover:scale-[1.02]">
+                                                <ImageIcon size={28} className="text-zinc-400 mb-2" />
+                                                <span className="text-[10px] font-black uppercase tracking-tighter text-zinc-400">Add Files</span>
+                                            </div>
+                                        </div>
+                                    </div>
+
+                                    {/* Previews */}
+                                    {proofFiles.length > 0 && (
+                                        <div className="flex gap-3 overflow-x-auto pb-4 no-scrollbar">
+                                            {proofFiles.map((file, idx) => (
+                                                <div key={idx} className="relative flex-shrink-0 group">
+                                                    {file.startsWith('data:image/') ? (
+                                                        <img src={file} alt="Preview" className="w-24 h-24 object-cover rounded-xl border border-white/10" />
+                                                    ) : (
+                                                        <div className="w-24 h-24 bg-zinc-900 border border-white/10 rounded-xl flex flex-col items-center justify-center p-2 text-center">
+                                                            <FileText size={24} className="text-primary mb-1" />
+                                                            <span className="text-[8px] font-bold text-zinc-500 truncate w-full">ZIP Archive</span>
+                                                        </div>
+                                                    )}
+                                                    <button
+                                                        onClick={() => removeProofFile(idx)}
+                                                        className="absolute -top-1.5 -right-1.5 bg-red-500 box-content p-1 rounded-full shadow-lg hover:scale-110 transition-transform z-20"
+                                                    >
+                                                        <X size={10} className="text-white font-bold" />
+                                                    </button>
+                                                </div>
+                                            ))}
+                                            {/* Slot indicators */}
+                                            {Array.from({ length: 5 - proofFiles.length }).map((_, i) => (
+                                                <div key={`empty-${i}`} className="w-24 h-24 rounded-xl border border-dashed border-white/5 flex items-center justify-center text-zinc-700">
+                                                    <PlusCircle size={16} />
+                                                </div>
+                                            ))}
+                                        </div>
+                                    )}
+                                </div>
+                                <Button
+                                    onClick={submitComplaint}
+                                    disabled={submitting || (!complaintText.trim() && proofFiles.length === 0)}
+                                    loading={submitting}
+                                    className="w-full mt-2 py-4 text-base"
+                                >
+                                    Submit Complaint ({proofFiles.length})
+                                </Button>
+                            </div>
+                        </Card>
+
+                        {/* ── MY ACTIVITY SECTION ────────────────────── */}
+                        <div className="space-y-4">
+                            <div className="flex items-center justify-between px-2">
+                                <h3 className="text-lg font-heading font-bold text-dark dark:text-white tracking-tight flex items-center gap-2">
+                                    <Clock4 size={20} className="text-primary" /> My Previous Activity
+                                </h3>
+                                <Badge variant="secondary" className="bg-primary/5 text-primary border-primary/10">
+                                    {userActivity.length} Total
+                                </Badge>
+                            </div>
+
+                            <div className="grid gap-4 grid-cols-1">
+                                {userActivity.map((activity) => (
+                                    <div key={activity.id} className="bg-white dark:bg-[#1A1A1A] border border-zinc-200 dark:border-white/5 rounded-3xl p-5 shadow-sm hover:shadow-md transition-all group overflow-hidden relative">
+                                        <div className="flex flex-col md:flex-row gap-5">
+                                            {/* Preview Image if exists */}
+                                            {activity.images && activity.images.length > 0 && (
+                                                <div className="w-full md:w-32 h-32 flex-shrink-0 relative rounded-2xl overflow-hidden border border-zinc-100 dark:border-white/10">
+                                                    <img
+                                                        src={activity.images[0]}
+                                                        alt="Proof"
+                                                        className="w-full h-full object-cover transition-transform group-hover:scale-110"
+                                                    />
+                                                    {activity.images.length > 1 && (
+                                                        <div className="absolute bottom-1.5 right-1.5 bg-black/60 backdrop-blur-md text-white text-[9px] font-black px-1.5 py-0.5 rounded-pill border border-white/10">
+                                                            +{activity.images.length - 1} MORE
+                                                        </div>
+                                                    )}
+                                                </div>
+                                            )}
+
+                                            <div className="flex-grow space-y-3">
+                                                <div className="flex items-start justify-between">
+                                                    <div>
+                                                        <div className="flex items-center gap-2 mb-1">
+                                                            <span className="text-[10px] font-black text-primary uppercase tracking-widest">{activity.session}</span>
+                                                            <span className="text-zinc-300 dark:text-zinc-700">•</span>
+                                                            <span className="text-[10px] font-bold text-zinc-500 uppercase tracking-widest">{activity.date}</span>
+                                                        </div>
+                                                        <p className="text-sm font-medium text-dark dark:text-zinc-300 leading-relaxed italic">
+                                                            "{activity.description || 'No description provided'}"
+                                                        </p>
+                                                    </div>
+                                                    <div className={`px-2.5 py-1 rounded-pill text-[9px] font-black uppercase tracking-widest border ${activity.status === 'Resolved'
+                                                        ? 'bg-green-500/10 text-green-500 border-green-500/20'
+                                                        : 'bg-amber-500/10 text-amber-500 border-amber-500/20'
+                                                        }`}>
+                                                        {activity.status}
+                                                    </div>
+                                                </div>
+
+                                                <div className="flex items-center justify-between pt-2 border-t border-zinc-100 dark:border-white/5">
+                                                    <span className="text-[9px] text-zinc-400 font-medium">
+                                                        Raised on {activity.createdAt?.toDate ? format(activity.createdAt.toDate(), 'MMM do, p') : 'Just now'}
+                                                    </span>
+                                                    {activity.adminResponse && (
+                                                        <div className="flex items-center gap-1.5 text-primary">
+                                                            <MessageSquare size={12} />
+                                                            <span className="text-[10px] font-bold">Admin Replied</span>
+                                                        </div>
+                                                    )}
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                ))}
+
+                                {userActivity.length === 0 && (
+                                    <div className="flex flex-col items-center justify-center p-12 bg-zinc-50 dark:bg-black/20 border-2 border-dashed border-zinc-200 dark:border-white/5 rounded-3xl opacity-60">
+                                        <MessageSquare size={32} className="text-zinc-400 mb-3" />
+                                        <p className="text-xs font-bold text-zinc-500 uppercase tracking-widest">No previous activity found</p>
+                                    </div>
+                                )}
+                            </div>
+                        </div>
+                    </div>
+                )}
+
+                {activeTab === 'profile' && (
+                    <div className="w-full max-w-4xl mx-auto space-y-6 animate-fade-in mt-4 pb-24">
+                        <Card>
+                            <div className="flex items-center justify-center flex-col text-center mb-8">
+                                <div className="w-24 h-24 rounded-full p-1 border-2 border-primary/50 relative mb-4 shadow-sm">
+                                    <div className="absolute inset-0 border-2 border-primary rounded-full animate-[spin_4s_linear_infinite] border-t-transparent border-l-transparent"></div>
+                                    <img src={`https://api.dicebear.com/7.x/adventurer/svg?seed=${settings?.avatar || userData?.avatar || 'boy'}`} alt="Avatar" className="w-full h-full object-cover rounded-full bg-black/20" />
+                                </div>
+                                <div>
+                                    <h3 className="text-3xl font-heading font-bold text-dark dark:text-white tracking-tight">{userData?.name}</h3>
+                                    <p className="text-mid font-medium my-1">{user?.email}</p>
+                                    <Badge variant={userData?.role} className="mt-2">{userData?.role?.toUpperCase()}</Badge>
+                                </div>
+                            </div>
+                            <div className="space-y-3">
+                                <div className="flex justify-between p-4 bg-white dark:bg-slate-800 border border-black/5 dark:border-white/5 rounded-2xl shadow-sm">
+                                    <span className="text-sm font-bold text-mid uppercase tracking-widest">Hostel</span>
+                                    <span className="text-sm font-semibold text-dark dark:text-white">{userData?.hostel}</span>
+                                </div>
+                                <div className="flex justify-between p-4 bg-white dark:bg-slate-800 border border-black/5 dark:border-white/5 rounded-2xl shadow-sm">
+                                    <span className="text-sm font-bold text-mid uppercase tracking-widest">Mess Type</span>
+                                    <span className="text-sm font-semibold text-dark dark:text-white">{userData?.messType}</span>
+                                </div>
+                                {userData?.role === 'student' && userData?.studyingYear && (
+                                    <div className="flex justify-between p-4 bg-white dark:bg-slate-800 border border-black/5 dark:border-white/5 rounded-2xl shadow-sm">
+                                        <span className="text-sm font-bold text-mid uppercase tracking-widest">Studying Year</span>
+                                        <span className="text-sm font-semibold text-dark dark:text-white">{userData?.studyingYear} Year</span>
+                                    </div>
+                                )}
+                            </div>
+
+                            <div className="space-y-4 mt-8 pt-6 border-t border-black/10 dark:border-white/10">
+                                <h4 className="font-heading font-semibold text-dark dark:text-white mb-2 text-lg tracking-tight">App Settings</h4>
+
+                                <button
+                                    onClick={() => setIsFeedbackOpen(true)}
+                                    className="w-full flex items-center justify-between p-4 bg-white dark:bg-slate-800 border border-black/5 dark:border-white/5 rounded-2xl hover:border-primary/50 transition-colors shadow-sm"
+                                >
+                                    <span className="text-sm font-bold text-dark dark:text-white flex items-center gap-2"><MessageSquare size={18} className="text-primary" /> Report Bug / Feedback</span>
+                                </button>
+
+                                {/* Profile Tagline */}
+                                <div className="text-center py-2 opacity-100">
+                                    <p className="text-[10px] font-bold text-black dark:text-white tracking-widest uppercase">
+                                        {config?.tagline || DEFAULT_TAGLINE}
+                                    </p>
+                                </div>
+
+                                <div className="flex items-center justify-between p-4 bg-white dark:bg-slate-800 border border-black/5 dark:border-white/5 rounded-2xl shadow-sm">
+                                    <span className="text-sm font-bold text-mid uppercase tracking-widest flex items-center gap-2">
+                                        Appearance
+                                    </span>
+                                    <div className="flex items-center gap-2 bg-zinc-100 dark:bg-black/20 p-1 rounded-pill">
+                                        <button
+                                            onClick={() => updateSettings?.({ darkMode: false })}
+                                            className={`px-3 py-1 rounded-pill text-[10px] font-black uppercase tracking-widest transition-all ${!settings?.darkMode ? 'bg-white text-[#0D0D0D] shadow-sm' : 'text-zinc-500'}`}
+                                        >
+                                            Light
+                                        </button>
+                                        <button
+                                            onClick={() => updateSettings?.({ darkMode: true })}
+                                            className={`px-3 py-1 rounded-pill text-[10px] font-black uppercase tracking-widest transition-all ${settings?.darkMode ? 'bg-[#D4F000] text-[#0D0D0D] shadow-sm' : 'text-zinc-500'}`}
+                                        >
+                                            Dark
+                                        </button>
+                                    </div>
+                                </div>
+
+                                {/* Avatar Selection */}
+                                <div className="space-y-2 p-4 bg-white dark:bg-slate-800 border border-black/5 dark:border-white/5 rounded-2xl flex flex-col items-center shadow-sm">
+                                    <label className="text-xs font-bold text-mid uppercase tracking-widest block mb-1">Avatar Selection</label>
+                                    <div className="flex gap-6 mt-2">
+                                        <button
+                                            onClick={() => updateSettings?.({ avatar: 'boy' })}
+                                            className={`w-16 h-16 rounded-full transition-all duration-300 ${settings?.avatar === 'boy' ? 'ring-4 ring-primary ring-offset-2 ring-offset-page scale-110 shadow-glow' : 'opacity-50 hover:opacity-100 grayscale hover:grayscale-0'}`}
+                                        >
+                                            <img src={`https://api.dicebear.com/7.x/adventurer/svg?seed=boy`} alt="Boy Avatar" className="w-full h-full object-cover rounded-full bg-slate-100 dark:bg-slate-700" />
+                                        </button>
+                                        <button
+                                            onClick={() => updateSettings?.({ avatar: 'girl' })}
+                                            className={`w-16 h-16 rounded-full transition-all duration-300 ${settings?.avatar === 'girl' ? 'ring-4 ring-primary ring-offset-2 ring-offset-page scale-110 shadow-glow' : 'opacity-50 hover:opacity-100 grayscale hover:grayscale-0'}`}
+                                        >
+                                            <img src={`https://api.dicebear.com/7.x/adventurer/svg?seed=girl`} alt="Girl Avatar" className="w-full h-full object-cover rounded-full bg-slate-100 dark:bg-slate-700" />
+                                        </button>
+                                    </div>
+                                </div>
+
+
+                                {/* Font Scale Slider Redesign */}
+                                <div className="space-y-4 p-5 bg-white dark:bg-slate-800 border border-black/5 dark:border-white/5 rounded-2xl shadow-sm">
+                                    <div className="flex justify-between items-center mb-1">
+                                        <div className="flex items-center gap-2">
+                                            <div className="p-1.5 bg-primary/10 rounded-lg">
+                                                <FileText size={14} className="text-primary" />
+                                            </div>
+                                            <span className="text-sm font-bold text-mid uppercase tracking-widest">Adjust Text Size</span>
+                                        </div>
+                                        <span className="text-sm font-black text-primary bg-primary/10 px-2 py-0.5 rounded-lg border border-primary/20">{Math.round(settings?.fontScale * 100)}%</span>
+                                    </div>
+                                    <div className="relative pt-2 group">
+                                        <div className="absolute top-1/2 -translate-y-1/2 w-full h-1.5 bg-zinc-100 dark:bg-black/40 rounded-full overflow-hidden">
+                                            <div
+                                                className="h-full bg-gradient-to-r from-primary/60 to-primary transition-all duration-300"
+                                                style={{ width: `${((settings?.fontScale - 0.8) / (1.3 - 0.8)) * 100}%` }}
+                                            />
+                                        </div>
+                                        <input
+                                            type="range"
+                                            min="0.8" max="1.3" step="0.05"
+                                            value={settings?.fontScale || 1.0}
+                                            onChange={(e) => updateSettings?.({ fontScale: parseFloat(e.target.value) })}
+                                            className="relative z-10 w-full h-1.5 bg-transparent appearance-none cursor-pointer outline-none slider-premium"
+                                        />
+                                        <style>{`
+                                            .slider-premium::-webkit-slider-thumb {
+                                                -webkit-appearance: none;
+                                                appearance: none;
+                                                width: 22px;
+                                                height: 22px;
+                                                background: white;
+                                                border: 4px solid rgba(var(--color-primary), 1);
+                                                border-radius: 50%;
+                                                cursor: grab;
+                                                box-shadow: 0 4px 12px rgba(var(--color-primary), 0.3);
+                                                transition: all 0.2s ease;
+                                            }
+                                            .slider-premium::-webkit-slider-thumb:hover {
+                                                transform: scale(1.15);
+                                                box-shadow: 0 6px 16px rgba(var(--color-primary), 0.4);
+                                            }
+                                            .slider-premium::-webkit-slider-thumb:active {
+                                                cursor: grabbing;
+                                                transform: scale(0.95);
+                                            }
+                                            .dark .slider-premium::-webkit-slider-thumb {
+                                                background: #1e293b;
+                                            }
+                                        `}</style>
+                                        <div className="flex justify-between mt-3 text-[10px] font-bold text-zinc-400 uppercase tracking-tighter">
+                                            <span>Compact</span>
+                                            <span>Default</span>
+                                            <span>Large</span>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+
+                            {/* ── PERMISSIONS SECTION ── */}
+                            <div className="space-y-3 mt-8 pt-6 border-t border-black/10 dark:border-white/10">
+                                <h4 className="font-heading font-semibold text-dark dark:text-white mb-2 text-lg tracking-tight flex items-center gap-2">
+                                    <Bell size={18} className="text-primary" /> Notification Permissions
+                                </h4>
+
+                                {/* System permission status */}
+                                <div className={`flex items-center justify-between p-4 rounded-2xl border shadow-sm
+                                    ${systemNotifPermission === 'granted'
+                                        ? 'bg-green-50 dark:bg-green-500/10 border-green-200 dark:border-green-500/20'
+                                        : systemNotifPermission === 'denied'
+                                            ? 'bg-red-50 dark:bg-red-500/10 border-red-200 dark:border-red-500/20'
+                                            : 'bg-white dark:bg-slate-800 border-black/5 dark:border-white/5'
+                                    }`}>
+                                    <span className="text-sm font-bold flex items-center gap-2">
+                                        {systemNotifPermission === 'granted'
+                                            ? <BellRing size={16} className="text-green-600" />
+                                            : systemNotifPermission === 'denied'
+                                                ? <BellOff size={16} className="text-red-500" />
+                                                : <Bell size={16} className="text-amber-500" />}
+                                        <span className={systemNotifPermission === 'granted' ? 'text-green-700 dark:text-green-300' : systemNotifPermission === 'denied' ? 'text-red-600 dark:text-red-400' : 'text-amber-600 dark:text-amber-400'}>
+                                            Browser Notifications: {systemNotifPermission === 'granted' ? 'Allowed' : systemNotifPermission === 'denied' ? 'Blocked (change in browser settings)' : 'Not yet allowed'}
+                                        </span>
+                                    </span>
+                                    {systemNotifPermission === 'default' && (
+                                        <button
+                                            onClick={async () => {
+                                                const r = await requestNotifPermission();
+                                                setSystemNotifPermission(r);
+                                                if (user?.uid) localStorage.setItem(`notifAsked_${user.uid}`, '1');
+                                            }}
+                                            className="text-xs font-bold px-3 py-1.5 bg-[#0057FF] text-white rounded-xl hover:bg-[#0044CC] transition-colors"
+                                        >
+                                            Allow
+                                        </button>
+                                    )}
+                                </div>
+
+                                {/* Meal notification toggle */}
+                                <div className="flex items-center justify-between p-4 bg-white dark:bg-slate-800 border border-black/5 dark:border-white/5 rounded-2xl shadow-sm">
+                                    <div>
+                                        <span className="text-sm font-bold text-dark dark:text-white flex items-center gap-2">
+                                            <Utensils size={15} className="text-primary" /> Meal Time Notifications
+                                        </span>
+                                        <p className="text-[10px] text-zinc-500 mt-0.5">Get notified when each mess session opens</p>
+                                    </div>
+                                    <button
+                                        onClick={() => setNotifPrefs({ mealNotif: !notifPrefs.mealNotif })}
+                                        disabled={systemNotifPermission !== 'granted'}
+                                        className={`relative w-11 h-6 rounded-full transition-colors duration-200 flex-shrink-0 ${notifPrefs.mealNotif && systemNotifPermission === 'granted'
+                                            ? 'bg-[#0057FF] dark:bg-[#D4F000]'
+                                            : 'bg-zinc-300 dark:bg-zinc-600'
+                                            } disabled:opacity-40`}
+                                    >
+                                        <span className={`absolute top-0.5 left-0.5 w-5 h-5 bg-white rounded-full shadow transition-transform duration-200 ${notifPrefs.mealNotif ? 'translate-x-5' : 'translate-x-0'
+                                            }`} />
+                                    </button>
+                                </div>
+
+                                {/* Notice notification toggle */}
+                                <div className="flex items-center justify-between p-4 bg-white dark:bg-slate-800 border border-black/5 dark:border-white/5 rounded-2xl shadow-sm">
+                                    <div>
+                                        <span className="text-sm font-bold text-dark dark:text-white flex items-center gap-2">
+                                            <Megaphone size={15} className="text-warning" /> Mess Notice Alerts
+                                        </span>
+                                        <p className="text-[10px] text-zinc-500 mt-0.5">Get notified when the admin posts a new notice</p>
+                                    </div>
+                                    <button
+                                        onClick={() => setNotifPrefs({ noticeNotif: !notifPrefs.noticeNotif })}
+                                        disabled={systemNotifPermission !== 'granted'}
+                                        className={`relative w-11 h-6 rounded-full transition-colors duration-200 flex-shrink-0 ${notifPrefs.noticeNotif && systemNotifPermission === 'granted'
+                                            ? 'bg-[#0057FF] dark:bg-[#D4F000]'
+                                            : 'bg-zinc-300 dark:bg-zinc-600'
+                                            } disabled:opacity-40`}
+                                    >
+                                        <span className={`absolute top-0.5 left-0.5 w-5 h-5 bg-white rounded-full shadow transition-transform duration-200 ${notifPrefs.noticeNotif ? 'translate-x-5' : 'translate-x-0'
+                                            }`} />
+                                    </button>
+                                </div>
+                            </div>
+
+                            <Button
+                                onClick={() => setShowProfileEdit(true)}
+                                className="w-full mt-6 py-4 text-base"
+                                variant="secondary"
+                            >
+                                Edit Profile details
+                            </Button>
+
+                            <button
+                                onClick={onLogout}
+                                className="w-full mt-4 flex items-center justify-center gap-2 py-4 bg-error/10 text-error hover:bg-error/20 active:scale-[0.98] transition-all rounded-2xl font-bold font-heading text-lg border border-error/20"
+                            >
+                                <LogOut size={22} className="stroke-[2.5]" /> Logout
+                            </button>
+                        </Card>
+                    </div>
+                )}
+
+            </main>
+
+            <nav className="fixed bottom-5 left-1/2 -translate-x-1/2 bg-white dark:bg-[#0D0D0D] border border-[#E4E4E4] dark:border-[#2A2A2A] p-1.5 rounded-pill flex justify-between gap-1 shadow-card-md dark:shadow-card-dark z-50 w-[96%] max-w-sm">
+                {[
+                    { id: 'menu', icon: Utensils, label: 'Menu' },
+                    { id: 'feedback', icon: Star, label: 'Rate' },
+                    { id: 'complaints', icon: Camera, label: 'Proof' },
+                    { id: 'profile', icon: User, label: 'Profile' }
+                ].map(({ id, icon: TabIcon, label }) => (
+                    <button
+                        key={id}
+                        onClick={() => setActiveTab(id)}
+                        className={`flex-1 py-2.5 px-2 rounded-pill flex flex-col items-center gap-1 transition-all duration-200 outline-none ${activeTab === id
+                            ? 'bg-[#0057FF] text-white dark:bg-[#D4F000] dark:text-[#0D0D0D] shadow-blue-glow dark:shadow-nik-btn scale-[1.02]'
+                            : 'text-[#6B6B6B] dark:text-[#A0A0A0] hover:text-[#0D0D0D] dark:hover:text-white'
+                            }`}
+                    >
+                        <TabIcon size={18} strokeWidth={activeTab === id ? 2.5 : 2} />
+                        <span className="text-[9px] font-bold tracking-wide uppercase">{label}</span>
+                    </button>
+                ))}
+            </nav>
+
+            {/* Image Preview Modal */}
+            {selectedImage && (
+                <div
+                    className="fixed inset-0 bg-black/90 z-50 flex items-center justify-center p-4"
+                    onClick={() => setSelectedImage(null)}
+                >
+                    <img src={selectedImage} alt="Full view" className="max-w-full max-h-full rounded-lg" />
+                    <button
+                        className="absolute top-4 right-4 text-white p-2"
+                        onClick={() => setSelectedImage(null)}
+                    >
+                        <X size={32} />
+                    </button>
+                </div>
+            )}
+            <UnifiedFeedbackModal
+                isOpen={isFeedbackOpen}
+                onClose={() => setIsFeedbackOpen(false)}
+                initialEmail={user?.email || ''}
+            />
+
+            {/* Notification Modal */}
+            {showNotices && (
+                <div className="fixed inset-0 z-[100] flex items-center justify-center px-4">
+                    <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={() => setShowNotices(false)}></div>
+                    <Card className="relative w-full max-w-lg bg-white dark:bg-[#16162A] border-zinc-200 dark:border-white/10 p-0 overflow-hidden rounded-[32px] animate-scale-in">
+                        <div className="p-6 border-b border-zinc-100 dark:border-white/5 flex justify-between items-center bg-zinc-50 dark:bg-black/20">
+                            <div className="flex items-center gap-3">
+                                <div className="p-2 bg-primary/10 rounded-xl">
+                                    <Megaphone size={20} className="text-primary" />
+                                </div>
+                                <h3 className="text-xl font-heading font-black text-[#0D0D0D] dark:text-white tracking-tight">Mess Notices</h3>
+                            </div>
+                            <button onClick={() => setShowNotices(false)} className="p-2 text-zinc-400 hover:text-zinc-600 dark:hover:text-white transition-colors">
+                                <X size={20} />
+                            </button>
+                        </div>
+                        <div className="max-h-[60vh] overflow-y-auto p-6 space-y-4">
+                            {notices.length > 0 ? (
+                                notices.map((notice) => (
+                                    <div key={notice.id} className="p-5 bg-zinc-50 dark:bg-white/5 rounded-2xl border border-zinc-100 dark:border-white/5 hover:border-primary/30 transition-all group">
+                                        <div className="flex justify-between items-start mb-2">
+                                            <h4 className="font-heading font-black text-primary text-base tracking-tight group-hover:translate-x-1 transition-transform">{notice.title}</h4>
+                                            <span className="text-[10px] font-bold text-zinc-400 uppercase tracking-widest">
+                                                {notice.createdAt?.toDate?.() ? format(notice.createdAt.toDate(), 'MMM d') : 'New'}
+                                            </span>
+                                        </div>
+                                        <p className="text-sm text-zinc-600 dark:text-zinc-400 leading-relaxed font-medium">
+                                            {notice.message}
+                                        </p>
+                                    </div>
+                                ))
+                            ) : (
+                                <div className="text-center py-12">
+                                    <Megaphone size={40} className="mx-auto text-zinc-300 mb-4 opacity-50" />
+                                    <p className="text-sm font-black text-zinc-400 uppercase tracking-widest">No active notices</p>
+                                </div>
+                            )}
+                        </div>
+                        <div className="p-6 bg-zinc-50 dark:bg-black/20 border-t border-zinc-100 dark:border-white/5">
+                            <Button onClick={() => setShowNotices(false)} className="w-full font-black py-3">Got it!</Button>
+                        </div>
+                    </Card>
+                </div>
+            )}
+        </div >
+    );
+};
