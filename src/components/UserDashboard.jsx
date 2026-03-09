@@ -303,9 +303,14 @@ export const UserDashboard = ({ user, userData, onLogout, onSwitchToAdmin, canSw
     };
 
     const updateProfile = async (updates) => {
-        setShowBouncingLogo(true);
-        await setDoc(doc(db, 'artifacts', appId, 'users', user.uid), { ...updates, updatedAt: serverTimestamp() }, { merge: true });
-        toast.success("Profile updated!");
+        try {
+            setShowBouncingLogo(true);
+            await setDoc(doc(db, 'artifacts', appId, 'users', user.uid), { ...updates, updatedAt: serverTimestamp() }, { merge: true });
+            toast.success("Profile updated!");
+        } catch (e) {
+            console.error("User profile update failed:", e);
+            toast.error("Failed to update profile. Please try again.");
+        }
     };
 
     const handleBouncingLogoComplete = () => {

@@ -714,9 +714,14 @@ export const AdminDashboard = ({ user, userData, onLogout, onSwitchToUser, confi
     ];
 
     const updateAdminProfile = async (updates) => {
-        setShowBouncingLogo(true);
-        await setDoc(doc(db, 'artifacts', appId, 'users', user.uid), { ...updates, updatedAt: serverTimestamp() }, { merge: true });
-        toast.success("Profile updated!");
+        try {
+            setShowBouncingLogo(true);
+            await setDoc(doc(db, 'artifacts', appId, 'users', user.uid), { ...updates, updatedAt: serverTimestamp() }, { merge: true });
+            toast.success("Profile updated!");
+        } catch (e) {
+            console.error("Admin profile update failed:", e);
+            toast.error("Failed to update profile. Please try again.");
+        }
     };
 
     const handleBouncingLogoComplete = () => {
@@ -786,6 +791,7 @@ export const AdminDashboard = ({ user, userData, onLogout, onSwitchToUser, confi
     };
 
     const maintenanceStatus = checkMaintenanceStatus();
+    const [showMaintenancePopup, setShowMaintenancePopup] = useState(true);
 
     const handleMaintenanceCleanup = async (type) => {
         try {
@@ -842,6 +848,24 @@ export const AdminDashboard = ({ user, userData, onLogout, onSwitchToUser, confi
         } catch (error) {
             console.error(error);
             toast.error("Cleanup failed. Please try again.");
+        } finally {
+            setShowBouncingLogo(false);
+        }
+    };
+
+    const handleAllMaintenanceCleanup = async () => {
+        if (!maintenanceStatus.ratingsResetNeeded && !maintenanceStatus.proofsResetNeeded) {
+            toast.success("No maintenance required at the moment.");
+            return;
+        }
+        try {
+            setShowBouncingLogo(true);
+            if (maintenanceStatus.ratingsResetNeeded) {
+                await handleMaintenanceCleanup('ratings');
+            }
+            if (maintenanceStatus.proofsResetNeeded) {
+                await handleMaintenanceCleanup('proofs');
+            }
         } finally {
             setShowBouncingLogo(false);
         }
@@ -2136,6 +2160,116 @@ export const AdminDashboard = ({ user, userData, onLogout, onSwitchToUser, confi
                                     </div>
                                 </div>
                             </Card>
+
+                            {/* System Maintenance & Demo Data */}
+                            <Card className="flex flex-col md:col-span-2 mt-6 bg-white dark:bg-[#16162A] border border-amber-500/20 dark:border-amber-300/20">
+                                <h3 className="font-heading font-bold text-[#0D0D0D] dark:text-white text-lg tracking-tight mb-4 flex items-center gap-2">
+                                    <ShieldAlert className="text-amber-500" size={20} />
+                                    System Maintenance & Demo Tools
+                                </h3>
+                                <p className="text-xs font-medium text-zinc-600 dark:text-zinc-400 mb-4">
+                                    Use these tools at the end of each cycle to clean up old ratings/proofs, or quickly seed demo menus. These actions no longer lock the admin interface.
+                                </p>
+
+                                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                                    <div className="bg-amber-50 dark:bg-amber-500/10 border border-amber-200 dark:border-amber-500/40 rounded-2xl p-4 flex flex-col gap-2">
+                                        <h4 className="text-xs font-black uppercase tracking-widest text-amber-600 dark:text-amber-300">All Maintenance</h4>
+                                        <p className="text-[11px] text-zinc-700 dark:text-zinc-300">
+                                            Runs both ratings reset and proofs cleanup if they are due.
+                                        </p>
+                                        <Button
+                                            onClick={handleAllMaintenanceCleanup}
+                                            className="mt-2 w-full bg-amber-500 hover:bg-amber-600 text-white font-black py-2.5"
+                                        >
+                                            Run All Maintenance
+                                        </Button>
+                                    </div>
+
+                                    <div className="bg-zinc-50 dark:bg-black/20 border border-zinc-200 dark:border-white/10 rounded-2xl p-4 flex flex-col gap-2">
+                                        <h4 className="text-xs font-black uppercase tracking-widest text-zinc-700 dark:text-zinc-300">Ratings Only</h4>
+                                        <p className="text-[11px] text-zinc-600 dark:text-zinc-400">
+                                            Backup and clear rating data for the last period when required.
+                                        </p>
+                                        <Button
+                                            onClick={() => handleMaintenanceCleanup('ratings')}
+                                            className="mt-2 w-full bg-emerald-600 hover:bg-emerald-700 text-white font-black py-2.5"
+                                        >
+                                            Ratings Maintenance
+                                        </Button>
+                                    </div>
+
+                                    <div className="bg-zinc-50 dark:bg-black/20 border border-zinc-200 dark:border-white/10 rounded-2xl p-4 flex flex-col gap-2">
+                                        <h4 className="text-xs font-black uppercase tracking-widest text-zinc-700 dark:text-zinc-300">Proofs Only</h4>
+                                        <p className="text-[11px] text-zinc-600 dark:text-zinc-400">
+                                            Backup and clear complaint proofs for the previous month.
+                                        </p>
+                                        <Button
+                                            onClick={() => handleMaintenanceCleanup('proofs')}
+                                            className="mt-2 w-full bg-primary hover:bg-primary-dark text-white font-black py-2.5"
+                                        >
+                                            Proofs Maintenance
+                                        </Button>
+                                    </div>
+                                </div>
+
+                                <div className="mt-6 pt-4 border-t border-zinc-200 dark:border-white/10">
+                                    <h4 className="font-heading font-semibold text-[#0D0D0D] dark:text-white mb-2 text-sm tracking-tight flex items-center gap-2">
+                                        <Sparkles size={16} className="text-primary" />
+                                        Demo Menus for March 8–10
+                                    </h4>
+                                    <p className="text-[11px] text-zinc-600 dark:text-zinc-400 mb-3">
+                                        Quickly seed temporary demo menus for all hostels and all mess types on March 8, 9, and 10 of this year.
+                                    </p>
+                                    <Button
+                                        onClick={async () => {
+                                            try {
+                                                setShowBouncingLogo(true);
+                                                const year = new Date().getFullYear();
+                                                const demoDays = [8, 9, 10];
+                                                const hostels = config?.hostels || DEFAULT_HOSTELS;
+                                                const messTypes = config?.messTypes || DEFAULT_MESS_TYPES;
+
+                                                const batch = writeBatch(db);
+
+                                                demoDays.forEach(day => {
+                                                    const dateObj = new Date(year, 2, day); // March is 2 (0-based)
+                                                    const adjustedDate = new Date(dateObj.getTime() - (dateObj.getTimezoneOffset() * 60000));
+                                                    const dateString = adjustedDate.toISOString().split('T')[0];
+
+                                                    hostels.forEach(h => {
+                                                        messTypes.forEach(m => {
+                                                            const docId = `${h}_${m}_${dateString}`;
+                                                            const docRef = doc(db, 'artifacts', appId, 'public', 'data', 'menus', docId);
+                                                            batch.set(docRef, {
+                                                                date: dateString,
+                                                                hostel: h,
+                                                                messType: m,
+                                                                breakfast: 'Demo Breakfast Menu',
+                                                                lunch: 'Demo Lunch Menu',
+                                                                snacks: 'Demo Snacks Menu',
+                                                                dinner: 'Demo Dinner Menu',
+                                                                updatedAt: serverTimestamp(),
+                                                                updatedBy: user.uid
+                                                            }, { merge: true });
+                                                        });
+                                                    });
+                                                });
+
+                                                await batch.commit();
+                                                toast.success("Demo menus created for March 8–10.");
+                                            } catch (e) {
+                                                console.error("Demo menu creation failed:", e);
+                                                toast.error("Failed to create demo menus.");
+                                            } finally {
+                                                setShowBouncingLogo(false);
+                                            }
+                                        }}
+                                        className="bg-primary hover:bg-primary-dark text-white font-black px-6"
+                                    >
+                                        Create Demo Menus
+                                    </Button>
+                                </div>
+                            </Card>
                         </div >
                     </div >
                 );
@@ -2311,65 +2445,52 @@ export const AdminDashboard = ({ user, userData, onLogout, onSwitchToUser, confi
                         bg-[#F7F7F7] dark:bg-[#0D0D14]
                         text-[#0D0D0D] dark:text-[#F0F0FF] selection:bg-[#2E7D32]/20 dark:selection:bg-[#7C3AED]/20">
 
-            {/* ── MAINTENANCE LOCK OVERLAY ─────────────────────── */}
-            {maintenanceStatus.lock && (
-                <div className="fixed inset-0 z-[100] bg-white/80 dark:bg-black/80 backdrop-blur-xl flex items-center justify-center p-6 text-center animate-in fade-in duration-500">
-                    <div className="max-w-md w-full bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-white/10 rounded-[32px] p-10 shadow-2xl space-y-8 relative overflow-hidden">
-                        <div className="absolute top-0 left-0 w-full h-2 bg-gradient-to-r from-amber-500 to-orange-500"></div>
-
-                        <div className="bg-amber-500/10 w-24 h-24 rounded-full flex items-center justify-center mx-auto mb-2 animate-bounce">
-                            <ShieldAlert size={48} className="text-amber-500" />
-                        </div>
-
-                        <div className="space-y-4">
-                            <h2 className="text-3xl font-heading font-black text-dark dark:text-white tracking-tight leading-tight">
-                                Maintenance Required
-                            </h2>
-                            <p className="text-sm font-medium text-zinc-500 dark:text-zinc-400 leading-relaxed">
-                                To ensure system performance and data privacy, the administrative dashboard is locked until the scheduled data cleanup is completed.
-                            </p>
-                        </div>
-
-                        <div className="space-y-6">
-                            {maintenanceStatus.ratingsResetNeeded && (
-                                <div className="bg-zinc-50 dark:bg-black/20 p-5 rounded-2xl border border-zinc-200 dark:border-white/5 text-left">
-                                    <h4 className="text-[10px] font-black uppercase tracking-widest text-amber-500 mb-2">Bi-Annual Ratings Reset</h4>
-                                    <p className="text-xs font-bold text-dark dark:text-zinc-300">Target: {maintenanceStatus.ratingsPeriod}</p>
-                                    <p className="text-[10px] text-zinc-500 mt-1">Deadline: {maintenanceStatus.ratingsDeadline}</p>
-                                    <Button
-                                        onClick={() => handleMaintenanceCleanup('ratings')}
-                                        className="w-full mt-4 bg-amber-500 hover:bg-amber-600 text-white font-black py-3 rounded-xl shadow-lg shadow-amber-500/20"
-                                    >
-                                        Download & Clear Ratings
-                                    </Button>
+            {/* ── MAINTENANCE REMINDER POPUP (NON-BLOCKING) ───────────── */}
+            {maintenanceStatus.lock && showMaintenancePopup && (
+                <div className="fixed bottom-5 right-5 z-[90] w-full max-w-sm">
+                    <div className="bg-white dark:bg-zinc-900 border border-amber-500/30 rounded-2xl shadow-2xl p-5 space-y-3">
+                        <div className="flex items-start justify-between gap-3">
+                            <div className="flex items-center gap-2">
+                                <div className="p-2 rounded-xl bg-amber-500/10">
+                                    <ShieldAlert size={20} className="text-amber-500" />
                                 </div>
-                            )}
-
-                            {maintenanceStatus.proofsResetNeeded && (
-                                <div className="bg-zinc-50 dark:bg-black/20 p-5 rounded-2xl border border-zinc-200 dark:border-white/5 text-left">
-                                    <h4 className="text-[10px] font-black uppercase tracking-widest text-primary mb-2">Monthly Proofs Cleanup</h4>
-                                    <p className="text-xs font-bold text-dark dark:text-zinc-300">Target: {maintenanceStatus.proofsPeriod}</p>
-                                    <p className="text-[10px] text-zinc-500 mt-1">Deadline: 1st of the month</p>
-                                    <Button
-                                        onClick={() => handleMaintenanceCleanup('proofs')}
-                                        className="w-full mt-4 bg-primary hover:bg-primary-dark text-white font-black py-3 rounded-xl shadow-lg shadow-primary/20"
-                                    >
-                                        Download & Clear Previous Month
-                                    </Button>
+                                <div>
+                                    <h3 className="text-sm font-heading font-black text-[#0D0D0D] dark:text-white tracking-tight">
+                                        Maintenance due soon
+                                    </h3>
+                                    <p className="text-[11px] text-zinc-600 dark:text-zinc-400 font-medium">
+                                        Some periodic maintenance tasks are pending. You can continue using the dashboard and run them from Settings when ready.
+                                    </p>
                                 </div>
-                            )}
+                            </div>
+                            <button
+                                onClick={() => setShowMaintenancePopup(false)}
+                                className="text-zinc-400 hover:text-zinc-600 dark:hover:text-white text-xs font-bold uppercase tracking-widest"
+                            >
+                                Close
+                            </button>
                         </div>
-
-                        <button
-                            onClick={onLogout}
-                            className="text-[10px] font-black uppercase tracking-widest text-zinc-400 hover:text-error transition-colors underline underline-offset-4"
-                        >
-                            Sign Out
-                        </button>
+                        <div className="flex gap-2 mt-1">
+                            <Button
+                                onClick={() => {
+                                    setActiveTab('settings');
+                                    setShowMaintenancePopup(false);
+                                }}
+                                className="flex-1 py-2 text-xs font-bold"
+                            >
+                                Go to Maintenance
+                            </Button>
+                            <Button
+                                variant="secondary"
+                                onClick={() => setShowMaintenancePopup(false)}
+                                className="px-3 py-2 text-[11px] font-bold"
+                            >
+                                Later
+                            </Button>
+                        </div>
                     </div>
                 </div>
             )}
-
             {/* Mobile Sidebar Toggle */}
             <button
                 onClick={() => setIsSidebarOpen(!isSidebarOpen)}

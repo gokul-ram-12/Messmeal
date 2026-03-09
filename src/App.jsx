@@ -288,7 +288,7 @@ const App = () => {
     }
   };
 
-  if (authLoading && localStorage.getItem('isLoggedIn') === 'true') {
+  if (authLoading) {
     return <LoadingScreen />;
   }
 
