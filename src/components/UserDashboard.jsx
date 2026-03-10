@@ -88,11 +88,8 @@ export const UserDashboard = ({ user, userData, onLogout, onSwitchToAdmin, canSw
     useEffect(() => {
         if (!userData?.hostel) return;
 
-        // Defer state updates to avoid synchronous cascading renders in effect
-        const timer = setTimeout(() => {
-            setIsLoadingMenu(true);
-            setMenu(null);
-        }, 0);
+        setIsLoadingMenu(true);
+        setMenu(null);
 
         const q = query(
             collection(db, 'artifacts', appId, 'public', 'data', 'menus'),
@@ -111,7 +108,6 @@ export const UserDashboard = ({ user, userData, onLogout, onSwitchToAdmin, canSw
         });
         return () => {
             unsub();
-            clearTimeout(timer);
         };
     }, [selectedDate, userData?.hostel, userData?.messType]);
 
@@ -211,6 +207,42 @@ export const UserDashboard = ({ user, userData, onLogout, onSwitchToAdmin, canSw
 
     const [submittingMeal, setSubmittingMeal] = useState(null);
     const [submittingAll, setSubmittingAll] = useState(false);
+
+    const submitMealRating = async (meal) => {
+        if (!ratings[meal]) return;
+
+        const todayStr = new Date().toLocaleDateString('en-CA');
+        if (selectedDate !== todayStr) {
+            toast.error("You can only submit ratings for today");
+            return;
+        }
+
+        setSubmittingAll(true);
+        try {
+            await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'ratings'), {
+                studentId: user.uid,
+                studentName: userData.name,
+                hostel: userData.hostel,
+                messType: userData.messType,
+                date: selectedDate,
+                mealType: meal,
+                rating: ratings[meal],
+                createdAt: serverTimestamp()
+            });
+
+            setRatings(prev => {
+                const updated = { ...prev };
+                delete updated[meal];
+                return updated;
+            });
+            toast.success(`${meal} rating submitted!`);
+        } catch (error) {
+            console.error("Submit error:", error);
+            toast.error("Failed to submit rating.");
+        } finally {
+            setSubmittingAll(false);
+        }
+    };
 
     const submitAllRatings = async () => {
         const todayStr = new Date().toLocaleDateString('en-CA');
@@ -565,19 +597,32 @@ export const UserDashboard = ({ user, userData, onLogout, onSwitchToAdmin, canSw
                                             </div>
 
                                             {!mealSubmitted && allowed && (
-                                                <div className="flex gap-2 justify-center pb-4">
-                                                    {[1, 2, 3, 4, 5].map((star) => (
-                                                        <button
-                                                            key={star}
-                                                            onClick={() => setRatings(prev => ({ ...prev, [meal]: star }))}
-                                                            className={`transition-transform hover:scale-110 focus:outline-none ${star <= currentRating ? 'scale-110 drop-shadow-sm' : ''}`}
+                                                <div className="flex flex-col gap-4 px-6 pb-6">
+                                                    <div className="flex gap-2 justify-center">
+                                                        {[1, 2, 3, 4, 5].map((star) => (
+                                                            <button
+                                                                key={star}
+                                                                onClick={() => setRatings(prev => ({ ...prev, [meal]: star }))}
+                                                                className={`transition-transform hover:scale-110 focus:outline-none ${star <= currentRating ? 'scale-110 drop-shadow-sm' : ''}`}
+                                                            >
+                                                                <Star
+                                                                    size={32}
+                                                                    className={`${star <= currentRating ? 'text-primary fill-primary' : 'text-zinc-600/30'} transition-transform duration-300`}
+                                                                />
+                                                            </button>
+                                                        ))}
+                                                    </div>
+
+                                                    {currentRating > 0 && (
+                                                        <Button
+                                                            onClick={() => submitMealRating(meal)}
+                                                            className="w-full py-3 text-xs font-black uppercase tracking-widest"
+                                                            disabled={submittingAll}
+                                                            loading={submittingAll}
                                                         >
-                                                            <Star
-                                                                size={32}
-                                                                className={`${star <= currentRating ? 'text-primary fill-primary' : 'text-zinc-600/30'} transition-transform duration-300`}
-                                                            />
-                                                        </button>
-                                                    ))}
+                                                            Submit {meal} Rating
+                                                        </Button>
+                                                    )}
                                                 </div>
                                             )}
                                         </div>

@@ -828,7 +828,7 @@ export const AdminDashboard = ({ user, userData, onLogout, onSwitchToUser, confi
     };
 
     // Derived stats
-    const stats = {
+    const stats = React.useMemo(() => ({
         totalUsers: usersList.length,
         students: usersList.filter(u => u.role === 'student').length,
         faculty: usersList.filter(u => u.role === 'faculty').length,
@@ -837,7 +837,7 @@ export const AdminDashboard = ({ user, userData, onLogout, onSwitchToUser, confi
         avgRating: feedbacks.length > 0
             ? (feedbacks.reduce((acc, f) => acc + (f.rating || 0), 0) / feedbacks.length).toFixed(1)
             : 'N/A'
-    };
+    }), [usersList, proofs, feedbacks]);
 
     const filteredProofs = proofs.filter(p => {
         const matchesDate = !proofDateFilter || p.date === proofDateFilter;
@@ -1108,7 +1108,11 @@ export const AdminDashboard = ({ user, userData, onLogout, onSwitchToUser, confi
                                 stat.hero ? (
                                     /* Hero card — accent colored */
                                     <div key={stat.label} className="p-5 rounded-2xl flex flex-col transition-transform hover:-translate-y-1 duration-200
-                                        bg-[#2E7D32] dark:bg-[#7C3AED] text-white shadow-lg">
+                                        bg-[#2E7D32] dark:bg-[#7C3AED] text-white shadow-lg relative overflow-hidden">
+                                        <div className="absolute top-2 right-2 flex items-center gap-1.5">
+                                            <span className="flex h-1.5 w-1.5 rounded-full bg-white animate-pulse"></span>
+                                            <span className="text-[7px] font-black uppercase tracking-widest opacity-80">Live</span>
+                                        </div>
                                         <div className="bg-white/20 w-10 h-10 rounded-xl flex items-center justify-center mb-4">
                                             <stat.icon size={22} className="text-white" />
                                         </div>
@@ -1118,7 +1122,13 @@ export const AdminDashboard = ({ user, userData, onLogout, onSwitchToUser, confi
                                 ) : (
                                     /* Regular cards */
                                     <div key={stat.label} className="p-5 rounded-2xl flex flex-col transition-transform hover:-translate-y-1 duration-200
-                                        bg-white dark:bg-[#16162A] border border-[#EEEEEE] dark:border-[#1E1E35] shadow-[0_2px_12px_rgba(0,0,0,0.06)] dark:shadow-none">
+                                        bg-white dark:bg-[#16162A] border border-[#EEEEEE] dark:border-[#1E1E35] shadow-[0_2px_12px_rgba(0,0,0,0.06)] dark:shadow-none relative">
+                                        {stat.label === 'Pending Approval' && stat.value > 0 && (
+                                            <div className="absolute top-3 right-3 flex items-center gap-1.5">
+                                                <span className="flex h-1.5 w-1.5 rounded-full bg-amber-500 animate-pulse"></span>
+                                                <span className="text-[7px] font-black uppercase tracking-widest text-amber-500">Live</span>
+                                            </div>
+                                        )}
                                         <div className={`w-10 h-10 rounded-xl flex items-center justify-center mb-4 ${stat.badgeBg}`}>
                                             <stat.icon size={20} className={stat.iconColor} />
                                         </div>
@@ -2687,6 +2697,9 @@ export const AdminDashboard = ({ user, userData, onLogout, onSwitchToUser, confi
                             <span>{item.label}</span>
                             {item.id === 'proofs' && stats.pendingProofs > 0 && (
                                 <span className="ml-auto bg-error text-white text-[10px] px-1.5 py-0.5 rounded-full font-black">{stats.pendingProofs}</span>
+                            )}
+                            {item.id === 'users' && stats.pendingUsers > 0 && (
+                                <span className="ml-auto bg-amber-500 text-white text-[10px] px-1.5 py-0.5 rounded-full font-black">{stats.pendingUsers}</span>
                             )}
                         </button>
                     ))}

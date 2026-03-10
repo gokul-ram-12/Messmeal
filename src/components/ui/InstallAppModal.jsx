@@ -2,9 +2,10 @@ import React, { useState, useEffect } from 'react';
 import { Download, X, Smartphone, Globe, Bell } from 'lucide-react';
 import { Button } from './Button';
 import { Card } from './Card';
+import { useInstallPrompt } from '../../lib/hooks';
 
 export const InstallAppModal = () => {
-    const [deferredPrompt, setDeferredPrompt] = useState(null);
+    const { isInstallable, install, dismiss } = useInstallPrompt();
     const [isIOS, setIsIOS] = useState(false);
     const [isStandalone, setIsStandalone] = useState(false);
     const [showModal, setShowModal] = useState(false);
@@ -13,55 +14,46 @@ export const InstallAppModal = () => {
         // Check if already installed
         const mqStandAlone = '(display-mode: standalone)';
         if (navigator.standalone || window.matchMedia(mqStandAlone).matches) {
-            const t = setTimeout(() => setIsStandalone(true), 0);
-            return () => clearTimeout(t);
+            setIsStandalone(true);
+            return;
         }
 
         // Check if iOS
         const userAgent = window.navigator.userAgent.toLowerCase();
         const isIpad = /macintosh/i.test(userAgent) && navigator.maxTouchPoints && navigator.maxTouchPoints > 1;
         if (/iphone|ipad|ipod/.test(userAgent) || isIpad) {
-            const t = setTimeout(() => setIsIOS(true), 0);
+            setIsIOS(true);
 
             // On iOS, we show the prompt manually if they haven't dismissed it
             const hasDismissed = localStorage.getItem('messmeal_dismissed_install');
             if (!hasDismissed) {
                 setTimeout(() => setShowModal(true), 3000); // Show after 3s delay
             }
-            return () => clearTimeout(t);
+            return;
         }
 
-        // Listen for standard PWA prompt event (Android/Chrome)
-        const handleBeforeInstallPrompt = (e) => {
-            e.preventDefault();
-            setDeferredPrompt(e);
-
+        // For non-iOS, if it's installable and not dismissed, show modal after delay
+        if (isInstallable) {
             const hasDismissed = localStorage.getItem('messmeal_dismissed_install');
             if (!hasDismissed) {
-                setTimeout(() => setShowModal(true), 3000);
+                const timer = setTimeout(() => setShowModal(true), 3000);
+                return () => clearTimeout(timer);
             }
-        };
-
-        window.addEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
-
-        return () => window.removeEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
-    }, []);
+        }
+    }, [isInstallable]);
 
     const handleInstallClick = async () => {
-        if (!deferredPrompt && !isIOS) return;
+        if (isIOS) return; // iOS users must use share menu
 
-        if (deferredPrompt) {
-            deferredPrompt.prompt();
-            const { outcome } = await deferredPrompt.userChoice;
-            if (outcome === 'accepted') {
-                setDeferredPrompt(null);
-                setShowModal(false);
-            }
+        const outcome = await install();
+        if (outcome === 'accepted') {
+            setShowModal(false);
         }
     };
 
     const handleDismiss = () => {
         setShowModal(false);
+        dismiss(); // Update hook state
         // Don't ask again for 7 days
         localStorage.setItem('messmeal_dismissed_install', new Date().toISOString());
     };

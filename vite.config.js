@@ -8,6 +8,11 @@ export default defineConfig({
     react(),
     VitePWA({
       registerType: 'autoUpdate',
+      workbox: {
+        cleanupOutdatedCaches: true,
+        clientsClaim: true,
+        skipWaiting: true
+      },
       includeAssets: ['pwa.png', 'pwa-192x192.png', 'pwa-512x512.png'],
       manifest: {
         name: 'MessMeal | Campus Dining',
