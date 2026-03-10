@@ -43,9 +43,9 @@ export const UnifiedFeedbackModal = ({ isOpen, onClose, initialEmail = '', confi
         try {
             await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'feedback_reports'), {
                 description,
-                email,
-                hostel,
-                messType,
+                email: email.trim(),
+                hostel: String(hostel).trim().toUpperCase(),
+                messType: String(messType).trim().toUpperCase(),
                 proofImage,
                 status: 'pending',
                 createdAt: serverTimestamp()

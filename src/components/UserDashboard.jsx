@@ -342,8 +342,8 @@ export const UserDashboard = ({ user, userData, onLogout, onSwitchToAdmin, canSw
             await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'proofs'), {
                 studentId: user.uid,
                 studentName: userData.name,
-                hostel: userData.hostel,
-                messType: userData.messType,
+                hostel: userData.hostel?.trim().toUpperCase() || '',
+                messType: userData.messType?.trim().toUpperCase() || '',
                 date: complaintDate,
                 session: complaintSession,
                 description: complaintText,

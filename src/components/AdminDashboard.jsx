@@ -55,11 +55,13 @@ export const AdminDashboard = ({ user, userData, onLogout, onSwitchToUser, confi
     const [usersList, setUsersList] = useState([]);
     const [proofs, setProofs] = useState([]);
     const [feedbacks, setFeedbacks] = useState([]);
+    const [reports, setReports] = useState([]);
     const [notices, setNotices] = useState([]);
 
     // UI states
     const [searchQuery, setSearchQuery] = useState('');
     const [userFilter, setUserFilter] = useState('all'); // all, pending, students, faculty, admins
+    const [feedbackSubTab, setFeedbackSubTab] = useState('ratings'); // ratings, suggestions
     const [selectedImage, setSelectedImage] = useState(null);
 
     // Proof filters state
@@ -192,11 +194,19 @@ export const AdminDashboard = ({ user, userData, onLogout, onSwitchToUser, confi
         return () => unsub();
     }, [activeTab, user]);
 
-    // Fetch feedbacks
+    // Fetch feedbacks (ratings)
     useEffect(() => {
         if (activeTab !== 'feedback' && activeTab !== 'dashboard') return;
         const q = query(collection(db, 'artifacts', appId, 'public', 'data', 'ratings'), orderBy('createdAt', 'desc'), limit(100));
         const unsub = onSnapshot(q, (snap) => setFeedbacks(snap.docs.map(d => ({ id: d.id, ...d.data() }))), (error) => console.log('Feedbacks error:', error));
+        return () => unsub();
+    }, [activeTab, user]);
+
+    // Fetch reports (suggestions/bugs from student/faculty)
+    useEffect(() => {
+        if (activeTab !== 'feedback' && activeTab !== 'dashboard') return;
+        const q = query(collection(db, 'artifacts', appId, 'public', 'data', 'feedback_reports'), orderBy('createdAt', 'desc'), limit(50));
+        const unsub = onSnapshot(q, (snap) => setReports(snap.docs.map(d => ({ id: d.id, ...d.data() }))), (error) => console.log('Reports error:', error));
         return () => unsub();
     }, [activeTab, user]);
 
@@ -679,6 +689,17 @@ export const AdminDashboard = ({ user, userData, onLogout, onSwitchToUser, confi
         });
     };
 
+    const resolveReport = async (id) => {
+        try {
+            await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'feedback_reports', id), {
+                status: 'Resolved',
+                resolvedAt: serverTimestamp(),
+                resolvedBy: user.uid
+            });
+            toast.success("Report marked as resolved");
+        } catch { toast.error("Failed to update report"); }
+    };
+
     const updateMenuSession = async (session) => {
         try {
             const targetHostels = getTargetHostels(menuHostel);
@@ -836,10 +857,11 @@ export const AdminDashboard = ({ user, userData, onLogout, onSwitchToUser, confi
         faculty: usersList.filter(u => u.role === 'faculty').length,
         pendingUsers: usersList.filter(u => u.approved === false).length,
         pendingProofs: proofs.filter(p => !p.status || p.status.toLowerCase() === 'pending').length,
+        pendingReports: reports.filter(r => !r.status || r.status.toLowerCase() === 'pending').length,
         avgRating: feedbacks.length > 0
             ? (feedbacks.reduce((acc, f) => acc + (f.rating || 0), 0) / feedbacks.length).toFixed(1)
             : 'N/A'
-    }), [usersList, proofs, feedbacks]);
+    }), [usersList, proofs, feedbacks, reports]);
 
     const filteredProofs = proofs.filter(p => {
         const matchesDate = !proofDateFilter || p.date === proofDateFilter;
@@ -1524,75 +1546,197 @@ export const AdminDashboard = ({ user, userData, onLogout, onSwitchToUser, confi
             }
             case 'feedback':
                 return (
-                    <div className="space-y-6 max-w-5xl">
-                        <div className="flex flex-col md:flex-row gap-4 bg-white dark:bg-[#16162A] border border-zinc-200 dark:border-white/10 p-4 rounded-3xl shadow-sm">
-                            <div className="flex-1 flex flex-col sm:flex-row gap-4 items-center">
-                                <h3 className="text-xl font-heading font-bold text-[#0D0D0D] dark:text-white tracking-tight flex items-center gap-3 mr-4">
-                                    <Star className="text-warning" size={24} /> Student Feedback
-                                </h3>
-                                <div className="flex flex-1 gap-3 w-full">
-                                    <input
-                                        type="date"
-                                        value={feedbackDateFilter}
-                                        onChange={(e) => setFeedbackDateFilter(e.target.value)}
-                                        className="flex-1 min-w-[120px] p-2 bg-zinc-50 dark:bg-black/40 border border-zinc-200 dark:border-white/10 rounded-xl text-xs outline-none focus:border-[#2E7D32]"
-                                    />
-                                    <Select
-                                        value={feedbackHostelFilter}
-                                        onChange={setFeedbackHostelFilter}
-                                        options={getHostelOptions(true)}
-                                        className="flex-1 min-w-[120px]"
-                                    />
-                                    <Select
-                                        value={feedbackMessTypeFilter}
-                                        onChange={setFeedbackMessTypeFilter}
-                                        options={getMessTypeOptions(true)}
-                                        className="flex-1 min-w-[120px]"
-                                    />
-                                </div>
+                    <div className="space-y-6 max-w-7xl">
+                        {/* Sub-tab Toggle */}
+                        <div className="flex flex-wrap items-center justify-between gap-4">
+                            <div className="flex gap-2 p-1 bg-white dark:bg-[#16162A] border border-zinc-200 dark:border-white/10 rounded-2xl w-fit shadow-sm">
+                                <button
+                                    onClick={() => setFeedbackSubTab('ratings')}
+                                    className={`px-5 py-2.5 rounded-xl text-sm font-bold transition-all duration-200 flex items-center gap-2 ${feedbackSubTab === 'ratings'
+                                        ? 'bg-[#2E7D32] dark:bg-[#7C3AED] text-white shadow-md'
+                                        : 'text-zinc-500 dark:text-zinc-400 hover:text-[#2E7D32] dark:hover:text-white hover:bg-zinc-100 dark:hover:bg-white/10'
+                                        }`}
+                                >
+                                    <Star size={16} /> Meal Ratings
+                                </button>
+                                <button
+                                    onClick={() => setFeedbackSubTab('suggestions')}
+                                    className={`px-5 py-2.5 rounded-xl text-sm font-bold transition-all duration-200 flex items-center gap-2 relative ${feedbackSubTab === 'suggestions'
+                                        ? 'bg-[#2E7D32] dark:bg-[#7C3AED] text-white shadow-md'
+                                        : 'text-zinc-500 dark:text-zinc-400 hover:text-[#2E7D32] dark:hover:text-white hover:bg-zinc-100 dark:hover:bg-white/10'
+                                        }`}
+                                >
+                                    <MessageSquare size={16} /> Suggestions & Bugs
+                                    {stats.pendingReports > 0 && (
+                                        <span className="absolute -top-1 -right-1 flex h-4 w-4 bg-error text-white text-[8px] font-black items-center justify-center rounded-full border-2 border-white dark:border-[#16162A]">
+                                            {stats.pendingReports}
+                                        </span>
+                                    )}
+                                </button>
                             </div>
-                            <Button variant="secondary" onClick={() => exportToExcel(feedbacks, 'student_feedback')} disabled={feedbacks.length === 0} className="bg-zinc-100 dark:bg-white/10 text-zinc-900 dark:text-white border-zinc-200 dark:border-white/20 hover:bg-zinc-200 dark:hover:bg-white/20">
-                                <FileSpreadsheet size={16} className="mr-2" />
-                                Export Excel
-                            </Button>
+
+                            <div className="flex flex-wrap items-center gap-3">
+                                {feedbackSubTab === 'ratings' ? (
+                                    <Button variant="secondary" onClick={() => exportToExcel(feedbacks, 'student_feedback')} disabled={feedbacks.length === 0} className="bg-zinc-100 dark:bg-white/10 text-zinc-900 dark:text-white border-zinc-200 dark:border-white/20 hover:bg-zinc-200 dark:hover:bg-white/20 font-bold shadow-none">
+                                        <FileSpreadsheet size={16} className="mr-2" />
+                                        Export Ratings
+                                    </Button>
+                                ) : (
+                                    <Button variant="secondary" onClick={() => exportToExcel(reports, 'suggestions_bugs')} disabled={reports.length === 0} className="bg-zinc-100 dark:bg-white/10 text-zinc-900 dark:text-white border-zinc-200 dark:border-white/20 hover:bg-zinc-200 dark:hover:bg-white/20 font-bold shadow-none">
+                                        <FileSpreadsheet size={16} className="mr-2" />
+                                        Export Reports
+                                    </Button>
+                                )}
+                            </div>
                         </div>
-                        <div className="grid gap-4 sm:grid-cols-2">
-                            {feedbacks.filter(f => {
-                                const fDate = (f.date || f.feedbackDate || '');
-                                const dateStr = fDate.length > 10 ? fDate.slice(0, 10) : fDate;
-                                const matchDate = !feedbackDateFilter || dateStr === feedbackDateFilter;
-                                const matchHostel = matchesSelection(f.hostel, feedbackHostelFilter, config?.hostelGroups, 'hostels');
-                                const matchType = matchesSelection(f.messType, feedbackMessTypeFilter, config?.messTypeGroups, 'types');
-                                return matchDate && matchHostel && matchType;
-                            }).map(f => (
-                                <Card key={f.id} className="flex flex-col bg-white dark:bg-[#16162A] border border-zinc-200 dark:border-white/10 hover:border-[#2E7D32]/30 transition-all shadow-sm">
-                                    <div className="flex justify-between items-start mb-4">
-                                        <div className="flex items-center gap-2 bg-zinc-100 dark:bg-black/40 p-2 rounded-xl border border-zinc-200 dark:border-white/10 shadow-inner">
-                                            {[1, 2, 3, 4, 5].map(star => (
-                                                <Star
-                                                    key={star}
-                                                    size={16}
-                                                    className={star <= f.rating ? 'text-warning fill-warning' : 'text-zinc-300 dark:text-zinc-600'}
-                                                />
-                                            ))}
-                                            <span className="text-xs font-bold text-zinc-700 dark:text-white ml-2">{f.rating}/5</span>
+
+                        {/* Filter Bar */}
+                        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 bg-white dark:bg-[#16162A] p-5 rounded-3xl border border-zinc-200 dark:border-white/10 shadow-sm">
+                            <div>
+                                <label className="block text-[10px] font-black text-zinc-500 dark:text-zinc-400 uppercase tracking-widest mb-2 ml-1">Filter by Date</label>
+                                <input
+                                    type="date"
+                                    value={feedbackDateFilter}
+                                    onChange={(e) => setFeedbackDateFilter(e.target.value)}
+                                    className="w-full p-3 bg-zinc-50 dark:bg-black/40 border border-zinc-200 dark:border-white/10 rounded-xl text-sm outline-none focus:border-[#2E7D32] dark:focus:border-[#7C3AED] text-zinc-900 dark:text-white transition-all shadow-inner"
+                                />
+                            </div>
+                            <Select
+                                label="Filter by Hostel"
+                                value={feedbackHostelFilter}
+                                onChange={setFeedbackHostelFilter}
+                                options={getHostelOptions(true)}
+                            />
+                            <Select
+                                label="Filter by Mess"
+                                value={feedbackMessTypeFilter}
+                                onChange={setFeedbackMessTypeFilter}
+                                options={getMessTypeOptions(true)}
+                            />
+                            <div className="flex items-end">
+                                <Button
+                                    variant="secondary"
+                                    onClick={() => { setFeedbackDateFilter(''); setFeedbackHostelFilter('ALL'); setFeedbackMessTypeFilter('ALL'); }}
+                                    className="w-full py-3 text-xs font-black uppercase tracking-widest text-zinc-500 hover:text-error bg-zinc-50 dark:bg-black/20 border-zinc-200 dark:border-white/10"
+                                >
+                                    <RefreshCw size={14} className="mr-2" /> Reset Filters
+                                </Button>
+                            </div>
+                        </div>
+
+                        {feedbackSubTab === 'ratings' ? (
+                            <div className="grid gap-6 sm:grid-cols-2 lg:grid-cols-3">
+                                {feedbacks.filter(f => {
+                                    const fDate = (f.date || f.feedbackDate || '');
+                                    const dateStr = fDate.length > 10 ? fDate.slice(0, 10) : fDate;
+                                    const matchDate = !feedbackDateFilter || dateStr === feedbackDateFilter;
+                                    const matchHostel = matchesSelection(f.hostel, feedbackHostelFilter, config?.hostelGroups, 'hostels');
+                                    const matchType = matchesSelection(f.messType, feedbackMessTypeFilter, config?.messTypeGroups, 'types');
+                                    return matchDate && matchHostel && matchType;
+                                }).map(f => (
+                                    <Card key={f.id} className="flex flex-col bg-white dark:bg-[#16162A] border border-zinc-200 dark:border-white/10 hover:border-[#2E7D32]/30 transition-all shadow-sm group">
+                                        <div className="flex justify-between items-start mb-4">
+                                            <div className="flex items-center gap-1.5 bg-zinc-100 dark:bg-black/40 px-2.5 py-1.5 rounded-xl border border-zinc-200 dark:border-white/10 shadow-inner">
+                                                {[1, 2, 3, 4, 5].map(star => (
+                                                    <Star
+                                                        key={star}
+                                                        size={14}
+                                                        className={star <= f.rating ? 'text-warning fill-warning' : 'text-zinc-300 dark:text-zinc-600'}
+                                                    />
+                                                ))}
+                                                <span className="text-xs font-black text-zinc-700 dark:text-white ml-1">{f.rating}</span>
+                                            </div>
+                                            <Badge variant="secondary" className="bg-zinc-100 dark:bg-white/10 text-zinc-600 dark:text-zinc-300 border-zinc-200 dark:border-white/20 font-bold">{f.mealType}</Badge>
                                         </div>
-                                        <Badge variant="secondary" className="bg-zinc-100 dark:bg-white/10 text-zinc-600 dark:text-zinc-300 border-zinc-200 dark:border-white/20">{f.mealType}</Badge>
+                                        <div className="mb-4">
+                                            <p className="font-heading font-black text-[#0D0D0D] dark:text-white text-base tracking-tight">{f.studentName || 'Anonymous Student'}</p>
+                                            <div className="flex items-center gap-2 mt-1">
+                                                <p className="text-xs font-bold text-zinc-500 dark:text-zinc-400">{f.hostel}</p>
+                                                <span className="w-1 h-1 rounded-full bg-zinc-300 dark:bg-zinc-700" />
+                                                <p className="text-xs font-bold text-zinc-500 dark:text-zinc-400">{f.messType}</p>
+                                            </div>
+                                        </div>
+                                        {f.comment && (
+                                            <p className="text-sm text-zinc-600 dark:text-zinc-300 leading-relaxed mb-4 italic line-clamp-3">"{f.comment}"</p>
+                                        )}
+                                        <div className="mt-auto pt-4 border-t border-zinc-100 dark:border-white/5 flex items-center justify-between">
+                                            <p className="text-[10px] font-black text-zinc-400 dark:text-zinc-500 uppercase tracking-[0.2em]">{f.date}</p>
+                                        </div>
+                                    </Card>
+                                ))}
+                                {feedbacks.length === 0 && (
+                                    <div className="col-span-full text-center py-20 border-2 border-dashed border-zinc-200 dark:border-white/5 rounded-[40px] bg-white/50 dark:bg-transparent backdrop-blur-sm">
+                                        <Star size={40} className="mx-auto text-zinc-300 mb-4 opacity-50" />
+                                        <p className="text-sm font-black text-zinc-400 uppercase tracking-[0.2em]">No feedback yet</p>
                                     </div>
-                                    <div>
-                                        <p className="font-heading font-bold text-[#0D0D0D] dark:text-white text-base">{f.studentName}</p>
-                                        <p className="text-sm font-medium text-zinc-600 dark:text-zinc-300 mt-1">{f.hostel} • {f.messType}</p>
-                                        <p className="text-[10px] font-bold text-zinc-400 dark:text-zinc-500 uppercase tracking-widest mt-4">{f.date}</p>
+                                )}
+                            </div>
+                        ) : (
+                            <div className="grid gap-6 sm:grid-cols-2 lg:grid-cols-3">
+                                {reports.filter(r => {
+                                    const rDate = r.createdAt?.toDate ? r.createdAt.toDate().toISOString() : '';
+                                    const dateStr = rDate.length > 10 ? rDate.slice(0, 10) : rDate;
+                                    const matchDate = !feedbackDateFilter || dateStr === feedbackDateFilter;
+                                    const matchHostel = matchesSelection(r.hostel, feedbackHostelFilter, config?.hostelGroups, 'hostels');
+                                    const matchType = matchesSelection(r.messType, feedbackMessTypeFilter, config?.messTypeGroups, 'types');
+                                    return matchDate && matchHostel && matchType;
+                                }).map(r => (
+                                    <Card key={r.id} className="flex flex-col bg-white dark:bg-[#16162A] border border-zinc-200 dark:border-white/10 hover:border-[#2E7D32]/30 transition-all shadow-sm group">
+                                        <div className="flex justify-between items-start mb-4">
+                                            <Badge variant={r.status === 'Resolved' ? 'success' : 'warning'} className="font-black text-[9px] px-2 py-0.5">
+                                                {r.status ? r.status.toUpperCase() : 'PENDING'}
+                                            </Badge>
+                                            <div className="text-[10px] font-black text-zinc-400 uppercase tracking-[0.2em]">
+                                                {r.createdAt?.toDate ? r.createdAt.toDate().toLocaleDateString() : 'Just now'}
+                                            </div>
+                                        </div>
+                                        <div className="mb-4">
+                                            <p className="text-sm font-bold text-zinc-500 dark:text-zinc-400 truncate mb-1">{r.email}</p>
+                                            <div className="flex items-center gap-2">
+                                                <p className="text-xs font-black text-[#2E7D32] dark:text-[#A78BFA] uppercase tracking-widest">{r.hostel}</p>
+                                                <span className="text-zinc-300 dark:text-zinc-700">/</span>
+                                                <p className="text-xs font-black text-[#2E7D32] dark:text-[#A78BFA] uppercase tracking-widest">{r.messType}</p>
+                                            </div>
+                                        </div>
+                                        <div className="bg-zinc-50 dark:bg-black/20 p-4 rounded-2xl border border-zinc-100 dark:border-white/5 mb-4 flex-1">
+                                            <p className="text-sm text-zinc-700 dark:text-zinc-300 leading-relaxed font-medium">
+                                                {r.description}
+                                            </p>
+                                        </div>
+                                        {r.proofImage && (
+                                            <button
+                                                onClick={() => setSelectedImage(r.proofImage)}
+                                                className="mb-4 flex items-center gap-2 text-xs font-bold text-primary hover:underline shadow-none"
+                                            >
+                                                <ImageIcon size={14} /> View Attached Screenshot
+                                            </button>
+                                        )}
+                                        <div className="mt-auto">
+                                            {r.status !== 'Resolved' ? (
+                                                <Button
+                                                    onClick={() => resolveReport(r.id)}
+                                                    variant="secondary"
+                                                    className="w-full py-2.5 bg-[#2E7D32]/5 border-[#2E7D32]/20 hover:bg-[#2E7D32]/10 text-[#2E7D32] shadow-none font-bold text-xs"
+                                                >
+                                                    <CheckCircle2 size={14} className="mr-2" /> Mark as Resolved
+                                                </Button>
+                                            ) : (
+                                                <div className="flex items-center justify-center gap-2 py-2 px-4 bg-zinc-50 dark:bg-white/5 rounded-xl border border-zinc-100 dark:border-white/5">
+                                                    <CheckCircle2 size={14} className="text-zinc-400" />
+                                                    <span className="text-[10px] font-black text-zinc-400 uppercase tracking-widest">Case Resolved</span>
+                                                </div>
+                                            )}
+                                        </div>
+                                    </Card>
+                                ))}
+                                {reports.length === 0 && (
+                                    <div className="col-span-full text-center py-20 border-2 border-dashed border-zinc-200 dark:border-white/5 rounded-[40px] bg-white/50 dark:bg-transparent backdrop-blur-sm">
+                                        <MessageSquare size={40} className="mx-auto text-zinc-300 mb-4 opacity-50" />
+                                        <p className="text-sm font-black text-zinc-400 uppercase tracking-[0.2em]">No suggestions or bugs reported</p>
                                     </div>
-                                </Card>
-                            ))}
-                            {feedbacks.length === 0 && (
-                                <div className="col-span-full text-center py-12 border-2 border-dashed border-white/10 rounded-3xl  ">
-                                    <Star size={40} className="mx-auto text-zinc-600 mb-4 opacity-50" />
-                                    <p className="text-sm font-bold text-zinc-400 uppercase tracking-widest">No feedback yet</p>
-                                </div>
-                            )}
-                        </div>
+                                )}
+                            </div>
+                        )}
                     </div>
                 );
 
@@ -2699,6 +2843,9 @@ export const AdminDashboard = ({ user, userData, onLogout, onSwitchToUser, confi
                             <span>{item.label}</span>
                             {item.id === 'proofs' && stats.pendingProofs > 0 && (
                                 <span className="ml-auto bg-error text-white text-[10px] px-1.5 py-0.5 rounded-full font-black">{stats.pendingProofs}</span>
+                            )}
+                            {item.id === 'feedback' && stats.pendingReports > 0 && (
+                                <span className="ml-auto bg-amber-500 text-white text-[10px] px-1.5 py-0.5 rounded-full font-black">{stats.pendingReports}</span>
                             )}
                             {item.id === 'users' && stats.pendingUsers > 0 && (
                                 <span className="ml-auto bg-amber-500 text-white text-[10px] px-1.5 py-0.5 rounded-full font-black">{stats.pendingUsers}</span>
