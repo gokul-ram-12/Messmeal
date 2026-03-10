@@ -1,7 +1,8 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { motion } from 'framer-motion';
-import { collection, query, onSnapshot, doc, updateDoc, setDoc, deleteDoc, serverTimestamp, writeBatch, getDocs, where, orderBy, limit, addDoc } from 'firebase/firestore';
+import { collection, query, onSnapshot, doc, getDoc, updateDoc, setDoc, deleteDoc, serverTimestamp, writeBatch, getDocs, where, orderBy, limit, addDoc } from 'firebase/firestore';
 import { db, appId } from '../lib/firebase';
+import { sendAdminNotificationEmail } from '../lib/mailer';
 import { LayoutDashboard, Users, Utensils, Megaphone, FileSpreadsheet, Settings, LogOut, Search, Check, X, Bell, Crown, Save, Calendar, BarChart3, ChevronRight, Menu as MenuIcon, AlertTriangle, Star, ImageIcon, Eye, Download, Shield, User, Clock4, PlusCircle, Trash2, RefreshCw, Globe, MessageSquare, CheckCircle2, Sparkles, ShieldAlert, ShieldCheck, FileText, Menu } from 'lucide-react';
 import * as XLSX from 'xlsx';
 import JSZip from 'jszip';
@@ -477,6 +478,7 @@ export const AdminDashboard = ({ user, userData, onLogout, onSwitchToUser, confi
             }
 
             await updateDoc(doc(db, 'artifacts', appId, 'users', userDoc.id), { role: 'admin', updatedAt: serverTimestamp() });
+            await sendAdminNotificationEmail(email, 'Admin', 'ADD_ADMIN');
 
             setSuccessModal({
                 isOpen: true,
@@ -518,6 +520,7 @@ export const AdminDashboard = ({ user, userData, onLogout, onSwitchToUser, confi
                     batch.update(doc(db, 'artifacts', appId, 'users', newOwnerDoc.id), { role: 'super_admin', updatedAt: serverTimestamp() });
                     // Downgrade current super_admin to admin
                     batch.update(doc(db, 'artifacts', appId, 'users', user.uid), { role: 'admin', updatedAt: serverTimestamp() });
+                    await sendAdminNotificationEmail(email, 'Super Admin', 'TRANSFER_OWNERSHIP');
 
                     await batch.commit();
 
@@ -826,9 +829,9 @@ export const AdminDashboard = ({ user, userData, onLogout, onSwitchToUser, confi
                     const docId = `${hostel}_${mType}_${year}_${month}`;
                     const docRef = doc(db, 'artifacts', appId, 'public', 'data', 'menus', docId);
 
-                    const snap = await getDocs(query(collection(db, 'artifacts', appId, 'public', 'data', 'menus'), where('__name__', '==', docId)));
+                    const menuSnap = await getDoc(docRef);
                     let monthData = { hostel, messType, year, month, days: [] };
-                    if (!snap.empty) monthData = snap.docs[0].data();
+                    if (menuSnap.exists()) monthData = menuSnap.data();
 
                     const days = [...(monthData.days || [])];
                     let dayIdx = days.findIndex(d => d.dates?.includes(dayNum));
@@ -859,8 +862,8 @@ export const AdminDashboard = ({ user, userData, onLogout, onSwitchToUser, confi
             const closureId = `${h}_${m}_${menuDate}`;
             const ref = doc(db, 'artifacts', appId, 'public', 'data', 'mess_closures', closureId);
 
-            const snap = await getDocs(query(collection(db, 'artifacts', appId, 'public', 'data', 'mess_closures'), where('__name__', '==', closureId)));
-            const currentlyClosed = !snap.empty && snap.docs[0].data().isClosed;
+            const snap = await getDoc(ref);
+            const currentlyClosed = snap.exists() && snap.data().isClosed;
 
             if (currentlyClosed) {
                 await deleteDoc(ref);
@@ -2605,14 +2608,14 @@ export const AdminDashboard = ({ user, userData, onLogout, onSwitchToUser, confi
                                 </div>
                             </Card>
 
-                            {/* System Maintenance & Demo Data */}
+                            {/* System Maintenance */}
                             <Card className="flex flex-col md:col-span-2 mt-6 bg-white dark:bg-[#16162A] border border-amber-500/20 dark:border-amber-300/20">
                                 <h3 className="font-heading font-bold text-[#0D0D0D] dark:text-white text-lg tracking-tight mb-4 flex items-center gap-2">
                                     <ShieldAlert className="text-amber-500" size={20} />
-                                    System Maintenance & Demo Tools
+                                    System Maintenance
                                 </h3>
                                 <p className="text-xs font-medium text-zinc-600 dark:text-zinc-400 mb-4">
-                                    Use these tools at the end of each cycle to clean up old ratings/proofs, or quickly seed demo menus. These actions no longer lock the admin interface.
+                                    Use these tools at the end of each cycle to clean up old ratings/proofs. These actions no longer lock the admin interface.
                                 </p>
 
                                 <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
@@ -2622,7 +2625,18 @@ export const AdminDashboard = ({ user, userData, onLogout, onSwitchToUser, confi
                                             Runs both ratings reset and proofs cleanup if they are due.
                                         </p>
                                         <Button
-                                            onClick={handleAllMaintenanceCleanup}
+                                            onClick={() => {
+                                                setConfirmModal({
+                                                    isOpen: true,
+                                                    title: 'Run Full Maintenance?',
+                                                    message: 'This will download ALL ratings and proofs as ZIP files, then permanently clear them from the database. This cannot be undone.',
+                                                    isDestructive: true,
+                                                    onConfirm: async () => {
+                                                        setConfirmModal({ ...confirmModal, isOpen: false });
+                                                        await handleAllMaintenanceCleanup();
+                                                    }
+                                                });
+                                            }}
                                             className="mt-2 w-full bg-amber-500 hover:bg-amber-600 text-white font-black py-2.5"
                                         >
                                             Run All Maintenance
@@ -2635,7 +2649,18 @@ export const AdminDashboard = ({ user, userData, onLogout, onSwitchToUser, confi
                                             Backup and clear rating data for the last period when required.
                                         </p>
                                         <Button
-                                            onClick={() => handleMaintenanceCleanup('ratings')}
+                                            onClick={() => {
+                                                setConfirmModal({
+                                                    isOpen: true,
+                                                    title: 'Clear All Ratings?',
+                                                    message: 'This will download all ratings as a ZIP backup then permanently delete them.',
+                                                    isDestructive: true,
+                                                    onConfirm: async () => {
+                                                        setConfirmModal({ ...confirmModal, isOpen: false });
+                                                        await handleMaintenanceCleanup('ratings');
+                                                    }
+                                                });
+                                            }}
                                             className="mt-2 w-full bg-emerald-600 hover:bg-emerald-700 text-white font-black py-2.5"
                                         >
                                             Ratings Maintenance
@@ -2648,73 +2673,27 @@ export const AdminDashboard = ({ user, userData, onLogout, onSwitchToUser, confi
                                             Backup and clear complaint proofs for the previous month.
                                         </p>
                                         <Button
-                                            onClick={() => handleMaintenanceCleanup('proofs')}
+                                            onClick={() => {
+                                                setConfirmModal({
+                                                    isOpen: true,
+                                                    title: 'Clear All Proofs?',
+                                                    message: 'This will download all complaint proofs as a ZIP backup then permanently delete them.',
+                                                    isDestructive: true,
+                                                    onConfirm: async () => {
+                                                        setConfirmModal({ ...confirmModal, isOpen: false });
+                                                        await handleMaintenanceCleanup('proofs');
+                                                    }
+                                                });
+                                            }}
                                             className="mt-2 w-full bg-primary hover:bg-primary-dark text-white font-black py-2.5"
                                         >
                                             Proofs Maintenance
                                         </Button>
                                     </div>
                                 </div>
-
-                                <div className="mt-6 pt-4 border-t border-zinc-200 dark:border-white/10">
-                                    <h4 className="font-heading font-semibold text-[#0D0D0D] dark:text-white mb-2 text-sm tracking-tight flex items-center gap-2">
-                                        <Sparkles size={16} className="text-primary" />
-                                        Demo Menus for March 8–10
-                                    </h4>
-                                    <p className="text-[11px] text-zinc-600 dark:text-zinc-400 mb-3">
-                                        Quickly seed temporary demo menus for all hostels and all mess types on March 8, 9, and 10 of this year.
-                                    </p>
-                                    <Button
-                                        onClick={async () => {
-                                            try {
-                                                setShowBouncingLogo(true);
-                                                const year = new Date().getFullYear();
-                                                const demoDays = [8, 9, 10];
-                                                const hostels = config?.hostels || DEFAULT_HOSTELS;
-                                                const messTypes = config?.messTypes || DEFAULT_MESS_TYPES;
-
-                                                const batch = writeBatch(db);
-
-                                                demoDays.forEach(day => {
-                                                    const dateObj = new Date(year, 2, day); // March is 2 (0-based)
-                                                    const dateString = dateObj.toLocaleDateString('en-CA');
-
-                                                    hostels.forEach(h => {
-                                                        messTypes.forEach(m => {
-                                                            const docId = `${h}_${m}_${dateString}`;
-                                                            const docRef = doc(db, 'artifacts', appId, 'public', 'data', 'menus', docId);
-                                                            batch.set(docRef, {
-                                                                date: dateString,
-                                                                hostel: h,
-                                                                messType: m,
-                                                                breakfast: 'Demo Breakfast Menu',
-                                                                lunch: 'Demo Lunch Menu',
-                                                                snacks: 'Demo Snacks Menu',
-                                                                dinner: 'Demo Dinner Menu',
-                                                                updatedAt: serverTimestamp(),
-                                                                updatedBy: user.uid
-                                                            }, { merge: true });
-                                                        });
-                                                    });
-                                                });
-
-                                                await batch.commit();
-                                                toast.success("Demo menus created for March 8–10.");
-                                            } catch (e) {
-                                                console.error("Demo menu creation failed:", e);
-                                                toast.error("Failed to create demo menus.");
-                                            } finally {
-                                                setShowBouncingLogo(false);
-                                            }
-                                        }}
-                                        className="bg-primary hover:bg-primary-dark text-white font-black px-6"
-                                    >
-                                        Create Demo Menus
-                                    </Button>
-                                </div>
                             </Card>
-                        </div >
-                    </div >
+                        </div>
+                    </div>
                 );
 
             case 'profile':
