@@ -199,11 +199,14 @@ export const AdminDashboard = ({ user, userData, onLogout, onSwitchToUser, confi
         return () => unsub();
     }, [user]);
 
-    // Fetch proofs (complaints)
+    // Fetch proofs (complaints) - REMOVE the tab guard
     useEffect(() => {
-        if (activeTab !== 'proofs' && activeTab !== 'dashboard') return;
         setIsLoadingProofs(true);
-        const q = query(collection(db, 'artifacts', appId, 'public', 'data', 'proofs'), orderBy('createdAt', 'desc'), limit(50));
+        const q = query(
+            collection(db, 'artifacts', appId, 'public', 'data', 'proofs'),
+            orderBy('createdAt', 'desc'),
+            limit(50)
+        );
         const unsub = onSnapshot(q, (snap) => {
             setProofs(snap.docs.map(d => ({ id: d.id, ...d.data() })));
             setIsLoadingProofs(false);
@@ -212,13 +215,16 @@ export const AdminDashboard = ({ user, userData, onLogout, onSwitchToUser, confi
             setIsLoadingProofs(false);
         });
         return () => unsub();
-    }, [activeTab, user]);
+    }, [user]); // removed activeTab dependency
 
-    // Fetch feedbacks (ratings)
+    // Fetch feedbacks (ratings) - REMOVE the tab guard
     useEffect(() => {
-        if (activeTab !== 'feedback' && activeTab !== 'dashboard') return;
         setIsLoadingFeedbacks(true);
-        const q = query(collection(db, 'artifacts', appId, 'public', 'data', 'ratings'), orderBy('createdAt', 'desc'), limit(50));
+        const q = query(
+            collection(db, 'artifacts', appId, 'public', 'data', 'ratings'),
+            orderBy('createdAt', 'desc'),
+            limit(50)
+        );
         const unsub = onSnapshot(q, (snap) => {
             setFeedbacks(snap.docs.map(d => ({ id: d.id, ...d.data() })));
             setIsLoadingFeedbacks(false);
@@ -227,13 +233,16 @@ export const AdminDashboard = ({ user, userData, onLogout, onSwitchToUser, confi
             setIsLoadingFeedbacks(false);
         });
         return () => unsub();
-    }, [activeTab, user]);
+    }, [user]); // removed activeTab dependency
 
-    // Fetch reports (suggestions/bugs from student/faculty)
+    // Fetch reports (suggestions/bugs from student/faculty) - REMOVE the tab guard
     useEffect(() => {
-        if (activeTab !== 'feedback' && activeTab !== 'dashboard') return;
         setIsLoadingReports(true);
-        const q = query(collection(db, 'artifacts', appId, 'public', 'data', 'feedback_reports'), orderBy('createdAt', 'desc'), limit(50));
+        const q = query(
+            collection(db, 'artifacts', appId, 'public', 'data', 'feedback_reports'),
+            orderBy('createdAt', 'desc'),
+            limit(50)
+        );
         const unsub = onSnapshot(q, (snap) => {
             setReports(snap.docs.map(d => ({ id: d.id, ...d.data() })));
             setIsLoadingReports(false);
@@ -242,7 +251,7 @@ export const AdminDashboard = ({ user, userData, onLogout, onSwitchToUser, confi
             setIsLoadingReports(false);
         });
         return () => unsub();
-    }, [activeTab, user]);
+    }, [user]); // removed activeTab dependency
 
     // Update time every minute for greeting
     useEffect(() => {

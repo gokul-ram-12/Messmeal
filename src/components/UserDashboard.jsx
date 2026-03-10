@@ -86,43 +86,44 @@ export const UserDashboard = ({ user, userData, onLogout, onSwitchToAdmin, canSw
         return result;
     }, [config, selectedDate]);
 
-    // Fetch menu
     useEffect(() => {
-        const h = (userData?.hostel || "").trim().toUpperCase();
-        const m = (userData?.messType || "").trim().toUpperCase();
+        const h = (userData?.hostel || '').trim().toUpperCase();
+        const m = (userData?.messType || '').trim().toUpperCase();
         if (!h || !m || !selectedDate) return;
 
         setIsLoadingMenu(true);
-        // Extract month/year and day from selectedDate (YYYY-MM-DD)
-        const dateObj = new Date(selectedDate);
+        const dateObj = new Date(selectedDate + 'T00:00:00');
         const year = dateObj.getFullYear();
         const month = dateObj.getMonth();
         const dayNumber = dateObj.getDate();
 
-        // Match the doc ID format from uploadMenuBatch: e.g., "MENS_VEG_2026_2"
         const docId = `${h}_${m}_${year}_${month}`;
+        const docRef = doc(db, 'artifacts', appId, 'public', 'data', 'menus', docId);
 
-        const q = query(
-            collection(db, 'artifacts', appId, 'public', 'data', 'menus'),
-            where('__name__', '==', docId),
-            limit(1)
-        );
-
-        const unsub = onSnapshot(q, (snap) => {
-            if (!snap.empty) {
-                const monthData = snap.docs[0].data();
+        const unsub = onSnapshot(docRef, (snap) => {
+            if (snap.exists()) {
+                const monthData = snap.data();
                 if (monthData && Array.isArray(monthData.days)) {
-                    // Find the day entry that includes the selected dayNumber
-                    const dayMenu = monthData.days.find(d => d.dates && d.dates.includes(dayNumber));
+                    const dayMenu = monthData.days.find(
+                        d => Array.isArray(d.dates) && d.dates.includes(dayNumber)
+                    );
                     if (dayMenu) {
                         setMenu({
-                            breakfast: dayMenu.breakfast.join(', '),
-                            lunch: dayMenu.lunch.join(', '),
-                            snacks: dayMenu.snacks.join(', '),
-                            dinner: dayMenu.dinner.join(', ')
+                            breakfast: Array.isArray(dayMenu.breakfast)
+                                ? dayMenu.breakfast.join('\n')
+                                : dayMenu.breakfast || '',
+                            lunch: Array.isArray(dayMenu.lunch)
+                                ? dayMenu.lunch.join('\n')
+                                : dayMenu.lunch || '',
+                            snacks: Array.isArray(dayMenu.snacks)
+                                ? dayMenu.snacks.join('\n')
+                                : dayMenu.snacks || '',
+                            dinner: Array.isArray(dayMenu.dinner)
+                                ? dayMenu.dinner.join('\n')
+                                : dayMenu.dinner || '',
                         });
                     } else {
-                        setMenu(null); // Day not found in Excel
+                        setMenu(null);
                     }
                 } else {
                     setMenu(null);
@@ -132,10 +133,11 @@ export const UserDashboard = ({ user, userData, onLogout, onSwitchToAdmin, canSw
             }
             setIsLoadingMenu(false);
         }, (err) => {
-            console.error("Menu fetch error:", err);
-            toast.error("Failed to load menu");
+            console.error('Menu fetch error:', err);
+            toast.error('Failed to load menu');
             setIsLoadingMenu(false);
         });
+
         return () => unsub();
     }, [selectedDate, userData?.hostel, userData?.messType]);
 

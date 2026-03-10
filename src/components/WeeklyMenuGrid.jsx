@@ -17,48 +17,76 @@ export const WeeklyMenuGrid = ({ userData, theme = 'orange' }) => {
     const [isLoading, setIsLoading] = useState(true);
 
     useEffect(() => {
-        if (!userData?.hostel) return;
+        const h = (userData?.hostel || '').trim().toUpperCase();
+        const m = (userData?.messType || '').trim().toUpperCase();
+        if (!h || !m) return;
 
         const timer = setTimeout(() => {
             setIsLoading(true);
         }, 0);
 
-        // Fix: Use toLocaleDateString('en-CA') to get local date in YYYY-MM-DD format
-        const today = new Date().toLocaleDateString('en-CA');
-        const endDate = addDays(new Date(), 14).toLocaleDateString('en-CA'); // 15 days
+        const now = new Date();
+        const currentYear = now.getFullYear();
+        const currentMonth = now.getMonth();
 
-        const q = query(
-            collection(db, 'artifacts', appId, 'public', 'data', 'menus'),
-            where('hostel', '==', userData.hostel),
-            where('messType', '==', userData.messType),
-            where('date', '>=', today),
-            where('date', '<=', endDate),
-            orderBy('date', 'asc'),
-            limit(15)
-        );
+        // We might need data from the next month if the 15-day window crosses a month boundary
+        const nextMonthDate = new Date(currentYear, currentMonth + 1, 1);
+        const nextMonthYear = nextMonthDate.getFullYear();
+        const nextMonthMonth = nextMonthDate.getMonth();
 
-        const unsub = onSnapshot(q, (snap) => {
-            const menus = snap.docs.map(doc => doc.data());
+        const docId1 = `${h}_${m}_${currentYear}_${currentMonth}`;
+        const docId2 = `${h}_${m}_${nextMonthYear}_${nextMonthMonth}`;
 
-            // Map fetched menus to a full 15-day array ensuring blanks are shown if data is missing
+        const docRef1 = doc(db, 'artifacts', appId, 'public', 'data', 'menus', docId1);
+        const docRef2 = doc(db, 'artifacts', appId, 'public', 'data', 'menus', docId2);
+
+        let data1 = null;
+        let data2 = null;
+
+        const updateState = (d1, d2) => {
             const filledWeeklyMenus = Array.from({ length: 15 }).map((_, i) => {
-                // Use local midnight as base to avoid UTC offset shifting the date
-                const localBase = new Date();
-                localBase.setHours(0, 0, 0, 0);
-                const targetDate = addDays(localBase, i).toLocaleDateString('en-CA');
-                const found = menus.find(m => m.date === targetDate);
-                return found || { date: targetDate, breakfast: '', lunch: '', snacks: '', dinner: '' };
-            });
+                const targetDateObj = new Date();
+                targetDateObj.setHours(0, 0, 0, 0);
+                targetDateObj.setDate(targetDateObj.getDate() + i);
 
+                const targetDay = targetDateObj.getDate();
+                const targetMonth = targetDateObj.getMonth();
+                const targetYear = targetDateObj.getFullYear();
+                const dateStr = targetDateObj.toLocaleDateString('en-CA');
+
+                const monthData = (targetMonth === currentMonth && targetYear === currentYear) ? d1 : d2;
+
+                if (monthData && Array.isArray(monthData.days)) {
+                    const found = monthData.days.find(d => Array.isArray(d.dates) && d.dates.includes(targetDay));
+                    if (found) {
+                        return {
+                            date: dateStr,
+                            breakfast: Array.isArray(found.breakfast) ? found.breakfast.join('\n') : found.breakfast || '',
+                            lunch: Array.isArray(found.lunch) ? found.lunch.join('\n') : found.lunch || '',
+                            snacks: Array.isArray(found.snacks) ? found.snacks.join('\n') : found.snacks || '',
+                            dinner: Array.isArray(found.dinner) ? found.dinner.join('\n') : found.dinner || '',
+                        };
+                    }
+                }
+                return { date: dateStr, breakfast: '', lunch: '', snacks: '', dinner: '' };
+            });
             setWeeklyMenus(filledWeeklyMenus);
             setIsLoading(false);
-        }, (err) => {
-            console.error("Weekly Menu fetch error:", err);
-            setIsLoading(false);
+        };
+
+        const unsub1 = onSnapshot(docRef1, (snap) => {
+            data1 = snap.exists() ? snap.data() : null;
+            updateState(data1, data2);
+        });
+
+        const unsub2 = onSnapshot(docRef2, (snap) => {
+            data2 = snap.exists() ? snap.data() : null;
+            updateState(data1, data2);
         });
 
         return () => {
-            unsub();
+            unsub1();
+            unsub2();
             clearTimeout(timer);
         };
     }, [userData?.hostel, userData?.messType]);
