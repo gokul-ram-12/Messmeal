@@ -16,13 +16,21 @@ export const format12H = (t) => {
 
 export const getMealStatus = (meal, timings, selectedDateStr) => {
     if (!timings || !timings[meal]) return 'UNKNOWN';
+    
+    // Explicit local timezone string mapping (YYYY-MM-DD)
     const now = new Date();
-    const todayStr = now.toISOString().split('T')[0];
+    const localYear = now.getFullYear();
+    const localMonth = String(now.getMonth() + 1).padStart(2, '0');
+    const localDay = String(now.getDate()).padStart(2, '0');
+    const todayStr = `${localYear}-${localMonth}-${localDay}`;
+    
     if (selectedDateStr < todayStr) return 'COMPLETED';
-    if (selectedDateStr > todayStr) return 'UPCOMING';
+    if (selectedDateStr > todayStr) return 'FUTURE_DAY';
+    
     const currentMinutes = now.getHours() * 60 + now.getMinutes();
     const start = getTimeMinutes(timings[meal].start);
     const end = getTimeMinutes(timings[meal].end);
+    
     if (currentMinutes < start) return 'UPCOMING';
     if (currentMinutes > end) return 'COMPLETED';
     return 'ONGOING';

@@ -85,8 +85,12 @@ export const MenuGrid = ({ menu, isLoading, activeTimings, selectedDateStr, nutr
                         statusText = "Closed";
                         cardCls = "opacity-80 grayscale-[0.6] shadow-sm";
                         statusBadge = "bg-white/20 text-white/70";
+                    } else if (status === 'FUTURE_DAY') {
+                        statusText = "Coming Soon";
+                        cardCls = "opacity-80 shadow-[0_8px_24px_rgba(0,0,0,0.06)] dark:shadow-[0_8px_32px_rgba(0,0,0,0.45)]";
+                        statusBadge = "bg-white/30 text-white";
                     } else {
-                        // UPCOMING
+                        // UPCOMING (for today's future meals)
                         statusText = `OPENS ${format12H(timing?.start)}`;
                         cardCls = "shadow-[0_8px_24px_rgba(0,0,0,0.06)] dark:shadow-[0_8px_32px_rgba(0,0,0,0.45)]";
                         statusBadge = "bg-white/20 text-white";
