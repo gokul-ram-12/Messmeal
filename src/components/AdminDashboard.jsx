@@ -1567,6 +1567,40 @@ export const AdminDashboard = ({ user, userData, onLogout, onSwitchToUser, confi
                             </div>
                         </Card>
 
+                        {/* Global Food Limits Card for easier discoverability */}
+                        <Card className="bg-white dark:bg-[#16162A] border-t-4 border-t-amber-500 border border-amber-500/20 shadow-sm overflow-hidden">
+                            <div className="p-6">
+                                <h3 className="font-heading font-black text-[#0D0D0D] dark:text-white mb-2 flex items-center gap-3 text-lg tracking-tight">
+                                    <Utensils size={24} className="text-amber-500" /> Global Food Limits / Instructions
+                                </h3>
+                                <p className="text-xs font-bold text-zinc-500 dark:text-zinc-400 uppercase tracking-widest mb-6">
+                                    These apply to all days automatically. Set them once here.
+                                </p>
+                                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+                                    {MEAL_ORDER.map(meal => (
+                                        <div key={meal} className="space-y-2">
+                                            <label className="text-[10px] font-black text-zinc-400 uppercase tracking-widest block ml-1">{meal}</label>
+                                            <textarea
+                                                value={editFoodLimits[meal] || ''}
+                                                onChange={(e) => setEditFoodLimits(prev => ({ ...prev, [meal]: e.target.value }))}
+                                                placeholder="e.g. Chicken 150g..."
+                                                className="w-full p-3 bg-zinc-100 dark:bg-black/40 border border-zinc-200 dark:border-white/10 rounded-xl text-xs outline-none focus:border-amber-500 h-24 resize-none transition-all"
+                                            />
+                                        </div>
+                                    ))}
+                                </div>
+                                <div className="mt-6 flex justify-end">
+                                    <Button 
+                                        onClick={() => onUpdateConfig({ foodLimits: editFoodLimits })} 
+                                        className="bg-amber-500 text-white px-8 py-3 rounded-xl shadow-lg shadow-amber-500/20 hover:scale-105 active:scale-95 transition-all text-sm font-black uppercase tracking-widest"
+                                        icon={Save}
+                                    >
+                                        Update Global Limits
+                                    </Button>
+                                </div>
+                            </div>
+                        </Card>
+
                         <Card className="bg-white dark:bg-[#16162A] border border-zinc-200 dark:border-white/10 shadow-sm">
                             <h3 className="font-heading font-bold text-[#0D0D0D] dark:text-white mb-6 flex items-center gap-3 text-lg tracking-tight">
                                 <Calendar size={24} className="text-[#2E7D32] dark:text-[#7C3AED]" /> Manual Entry
