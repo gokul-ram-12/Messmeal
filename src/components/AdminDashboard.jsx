@@ -49,6 +49,7 @@ export const AdminDashboard = ({ user, userData, onLogout, onSwitchToUser, confi
     const [showProfileEdit, setShowProfileEdit] = useState(false);
     const [showBouncingLogo, setShowBouncingLogo] = useState(false);
     const [showMaintenancePopup, setShowMaintenancePopup] = useState(true);
+    const [maintenanceProgress, setMaintenanceProgress] = useState(null);
     const [isFeedbackOpen, setIsFeedbackOpen] = useState(false);
     const [currentTime, setCurrentTime] = useState(new Date());
     const [submitting, setSubmitting] = useState(false);
@@ -982,7 +983,9 @@ export const AdminDashboard = ({ user, userData, onLogout, onSwitchToUser, confi
         const totalUsers = usersList.length;
         const students = usersList.filter(u => u.role === 'student').length;
         const faculty = usersList.filter(u => u.role === 'faculty').length;
-        const pendingUsers = usersList.filter(u => !u.approved).length;
+        const pendingUsers = usersList.filter(
+            u => !u.approved && u.role !== 'revoked'
+        ).length;
 
         // Online = active in last 5 minutes
         const fiveMinsAgo = new Date(Date.now() - 5 * 60 * 1000);
@@ -1036,7 +1039,7 @@ export const AdminDashboard = ({ user, userData, onLogout, onSwitchToUser, confi
     };
 
     const filteredUsers = usersList.filter(u => {
-        if (userFilter === 'pending') return !u.approved;
+        if (userFilter === 'revoked') return u.role === 'revoked';
         if (userFilter === 'students') return u.role === 'student';
         if (userFilter === 'faculty') return u.role === 'faculty';
         if (userFilter === 'admins') return u.role === 'admin' || u.role === 'super_admin';
@@ -1079,149 +1082,206 @@ export const AdminDashboard = ({ user, userData, onLogout, onSwitchToUser, confi
     }
 
     const checkMaintenanceStatus = () => {
-        if (!config) return { lock: false };
+        if (!config) return { ratingsNeeded: false, proofsNeeded: false };
 
         const now = new Date();
         const year = now.getFullYear();
         const month = now.getMonth(); // 0-11
-        const day = now.getDate(); // 1-31
-
         const maintenance = config.maintenance || {};
 
-        // 1. Bi-Annual Ratings Reset (Dec 31 & Jun 30)
-        // Reset happens for previous period if now >= July 1 (for Jan-Jun) or now >= Jan 1 (for Jul-Dec)
-        let ratingsResetNeeded = false;
-        let ratingsPeriod = "";
-        let ratingsDeadline = null;
+        // RATINGS — due on the 1st of every month
+        let ratingsNeeded = false;
+        const lastRatingsReset = maintenance.lastRatingsReset
+            ? new Date(maintenance.lastRatingsReset)
+            : null;
+        const startOfThisMonth = new Date(year, month, 1);
+        if (!lastRatingsReset || lastRatingsReset < startOfThisMonth) {
+            ratingsNeeded = true;
+        }
 
-        if (month >= 6) { // July to Dec
-            ratingsDeadline = "June 30";
-            if (!maintenance.lastRatingsReset || new Date(maintenance.lastRatingsReset) < new Date(year, 5, 30)) {
-                ratingsResetNeeded = true;
-                ratingsPeriod = "January - June " + year;
-            }
-        } else { // Jan to June
-            ratingsDeadline = "December 31";
-            if (!maintenance.lastRatingsReset || new Date(maintenance.lastRatingsReset) < new Date(year - 1, 11, 31)) {
-                ratingsResetNeeded = true;
-                ratingsPeriod = "July - December " + (year - 1);
+        // PROOFS — due every Sunday only
+        let proofsNeeded = false;
+        const lastProofsReset = maintenance.lastProofsReset
+            ? new Date(maintenance.lastProofsReset)
+            : null;
+        const dayOfWeek = now.getDay(); // 0 = Sunday
+        const lastSunday = new Date(now);
+        lastSunday.setDate(now.getDate() - dayOfWeek);
+        lastSunday.setHours(0, 0, 0, 0);
+        if (dayOfWeek === 0) { // Today is Sunday
+            if (!lastProofsReset || lastProofsReset < lastSunday) {
+                proofsNeeded = true;
             }
         }
 
-        // 2. Monthly Proofs Reset (1st of every month)
-        let proofsResetNeeded = false;
-        let proofsPeriod = "";
-        const firstOfMonth = new Date(year, month, 1);
-        if (day >= 1) { // It's the 1st or later
-            if (!maintenance.lastProofsReset || new Date(maintenance.lastProofsReset) < firstOfMonth) {
-                // If it's explicitly the 1st, or we are past the 1st and haven't reset
-                proofsResetNeeded = true;
-                const prevMonth = new Date(year, month - 1, 1);
-                proofsPeriod = prevMonth.toLocaleString('default', { month: 'long', year: 'numeric' });
-            }
-        }
-
-        return {
-            lock: ratingsResetNeeded || proofsResetNeeded,
-            ratingsResetNeeded,
-            ratingsPeriod,
-            ratingsDeadline,
-            proofsResetNeeded,
-            proofsPeriod
-        };
+        return { ratingsNeeded, proofsNeeded };
     };
 
     const maintenanceStatus = checkMaintenanceStatus();
 
     const handleMaintenanceCleanup = async (type) => {
         try {
-            setShowBouncingLogo(true);
-            const maintenance = config.maintenance || {};
             const zip = new JSZip();
+            const maintenance = config?.maintenance || {};
+            const now = new Date();
 
             if (type === 'ratings') {
-                const q = query(collection(db, 'artifacts', appId, 'public', 'data', 'ratings'));
-                const snap = await getDocs(q);
+                setMaintenanceProgress({ phase: 'ratings', step: 'fetching', percent: 5, label: 'Fetching ratings from database...' });
+                const snap = await getDocs(query(collection(db, 'artifacts', appId, 'public', 'data', 'ratings')));
                 const data = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+                setMaintenanceProgress({ phase: 'ratings', step: 'fetching', percent: 30, label: `Fetched ${data.length} ratings...` });
 
-                if (data.length > 0) {
-                    const csvContent = XLSX.utils.sheet_to_csv(XLSX.utils.json_to_sheet(data));
-                    zip.file(`Ratings_${maintenanceStatus.ratingsPeriod.replace(/ /g, '_')}.csv`, csvContent);
-                    const content = await zip.generateAsync({ type: 'blob' });
-                    const url = URL.createObjectURL(content);
-                    const link = document.createElement('a');
-                    link.href = url;
-                    link.download = `MessMeal_Ratings_${maintenanceStatus.ratingsPeriod.replace(/ /g, '_')}.zip`;
-                    link.click();
+                if (data.length === 0) {
+                    setMaintenanceProgress({ phase: 'ratings', step: 'done', percent: 100, label: 'No ratings to clear.' });
+                    await new Promise(r => setTimeout(r, 1500));
+                    setMaintenanceProgress(null);
+                    toast.success('No ratings found to clear.');
+                    return;
                 }
 
-                const batch = writeBatch(db);
-                snap.docs.forEach(d => batch.delete(d.ref));
-                await batch.commit();
-
-                await onUpdateConfig({
-                    maintenance: { ...maintenance, lastRatingsReset: serverTimestamp() }
+                setMaintenanceProgress({ phase: 'ratings', step: 'downloading', percent: 40, label: 'Building ZIP file...' });
+                const csvContent = XLSX.utils.sheet_to_csv(XLSX.utils.json_to_sheet(data));
+                const monthLabel = now.toLocaleString('default', { month: 'long', year: 'numeric' });
+                zip.file(`Ratings_${monthLabel.replace(/ /g, '_')}.csv`, csvContent);
+                setMaintenanceProgress({ phase: 'ratings', step: 'downloading', percent: 55, label: 'Compressing data...' });
+                const content = await zip.generateAsync({ type: 'blob' }, (metadata) => {
+                    setMaintenanceProgress({ phase: 'ratings', step: 'downloading', percent: Math.round(55 + metadata.percent * 0.05), label: `Compressing... ${Math.round(metadata.percent)}%` });
                 });
+
+                setMaintenanceProgress({ phase: 'ratings', step: 'downloading', percent: 62, label: 'Downloading ZIP to your device...' });
+                const url = URL.createObjectURL(content);
+                const link = document.createElement('a');
+                link.href = url;
+                link.download = `MessMeal_Ratings_${monthLabel.replace(/ /g, '_')}.zip`;
+                link.click();
+                URL.revokeObjectURL(url);
+                setMaintenanceProgress({ phase: 'ratings', step: 'downloading', percent: 70, label: 'Download started!' });
+                await new Promise(r => setTimeout(r, 800));
+
+                setMaintenanceProgress({ phase: 'ratings', step: 'deleting', percent: 72, label: 'Clearing ratings from database...' });
+                const total = snap.docs.length;
+                let deleted = 0;
+                const chunkSize = 490;
+                for (let i = 0; i < snap.docs.length; i += chunkSize) {
+                    const chunk = snap.docs.slice(i, i + chunkSize);
+                    const batch = writeBatch(db);
+                    chunk.forEach(d => batch.delete(d.ref));
+                    await batch.commit();
+                    deleted += chunk.length;
+                    const percent = Math.round(72 + (deleted / total) * 23);
+                    setMaintenanceProgress({ phase: 'ratings', step: 'deleting', percent, label: `Deleted ${deleted} of ${total} ratings...` });
+                }
+
+                setMaintenanceProgress({ phase: 'ratings', step: 'deleting', percent: 96, label: 'Saving maintenance record...' });
+                await onUpdateConfig({
+                    maintenance: { ...maintenance, lastRatingsReset: now.toISOString() }
+                });
+                setMaintenanceProgress({ phase: 'ratings', step: 'done', percent: 100, label: '✓ Ratings maintenance complete!' });
+                await new Promise(r => setTimeout(r, 1500));
+                setMaintenanceProgress(null);
                 setSuccessModal({
                     isOpen: true,
-                    title: "Ratings Cleared!",
-                    message: `All ratings for the period ${maintenanceStatus.ratingsPeriod} have been backed up and cleared.`
+                    title: 'Ratings Cleared! ✓',
+                    message: `${total} ratings backed up as ZIP and cleared from the database. Next reminder in 1 month.`
                 });
-                toast.success("Ratings cleared successfully!");
+
             } else if (type === 'proofs') {
-                const q = query(collection(db, 'artifacts', appId, 'public', 'data', 'proofs'));
-                const snap = await getDocs(q);
+                setMaintenanceProgress({ phase: 'proofs', step: 'fetching', percent: 5, label: 'Fetching complaint proofs...' });
+                const snap = await getDocs(query(collection(db, 'artifacts', appId, 'public', 'data', 'proofs')));
                 const data = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+                setMaintenanceProgress({ phase: 'proofs', step: 'fetching', percent: 30, label: `Fetched ${data.length} proofs...` });
 
-                if (data.length > 0) {
-                    const csvContent = XLSX.utils.sheet_to_csv(XLSX.utils.json_to_sheet(data));
-                    zip.file(`Proofs_${maintenanceStatus.proofsPeriod.replace(/ /g, '_')}.csv`, csvContent);
-                    const content = await zip.generateAsync({ type: 'blob' });
-                    const url = URL.createObjectURL(content);
-                    const link = document.createElement('a');
-                    link.href = url;
-                    link.download = `MessMeal_Proofs_${maintenanceStatus.proofsPeriod.replace(/ /g, '_')}.zip`;
-                    link.click();
+                if (data.length === 0) {
+                    setMaintenanceProgress({ phase: 'proofs', step: 'done', percent: 100, label: 'No proofs to clear.' });
+                    await new Promise(r => setTimeout(r, 1500));
+                    setMaintenanceProgress(null);
+                    toast.success('No proofs found to clear.');
+                    return;
                 }
 
-                const batch = writeBatch(db);
-                snap.docs.forEach(d => batch.delete(d.ref));
-                await batch.commit();
+                setMaintenanceProgress({ phase: 'proofs', step: 'downloading', percent: 40, label: 'Building ZIP file...' });
+                const csvContent = XLSX.utils.sheet_to_csv(XLSX.utils.json_to_sheet(
+                    data.map(p => ({
+                        id: p.id,
+                        studentName: p.studentName || '',
+                        hostel: p.hostel || '',
+                        messType: p.messType || '',
+                        mealType: p.mealType || '',
+                        date: p.date || '',
+                        description: p.description || '',
+                        status: p.status || '',
+                        imageUrl: p.imageUrl || '',
+                        createdAt: p.createdAt || ''
+                    }))
+                ));
+                const sundayLabel = new Date().toLocaleDateString('en-CA');
+                zip.file(`Proofs_${sundayLabel}.csv`, csvContent);
 
-                await onUpdateConfig({
-                    maintenance: { ...maintenance, lastProofsReset: serverTimestamp() }
+                const imageList = data
+                    .filter(p => p.imageUrl)
+                    .map(p => `${p.studentName || p.studentId} | ${p.date} | ${p.mealType} | ${p.imageUrl}`)
+                    .join('\n');
+                if (imageList) zip.file(`Proof_Image_URLs_${sundayLabel}.txt`, imageList);
+
+                setMaintenanceProgress({ phase: 'proofs', step: 'downloading', percent: 55, label: 'Compressing data...' });
+                const content = await zip.generateAsync({ type: 'blob' }, (metadata) => {
+                    setMaintenanceProgress({ phase: 'proofs', step: 'downloading', percent: Math.round(55 + metadata.percent * 0.05), label: `Compressing... ${Math.round(metadata.percent)}%` });
                 });
+
+                setMaintenanceProgress({ phase: 'proofs', step: 'downloading', percent: 62, label: 'Downloading ZIP to your device...' });
+                const url = URL.createObjectURL(content);
+                const link = document.createElement('a');
+                link.href = url;
+                link.download = `MessMeal_Proofs_${sundayLabel}.zip`;
+                link.click();
+                URL.revokeObjectURL(url);
+                setMaintenanceProgress({ phase: 'proofs', step: 'downloading', percent: 70, label: 'Download started!' });
+                await new Promise(r => setTimeout(r, 800));
+
+                setMaintenanceProgress({ phase: 'proofs', step: 'deleting', percent: 72, label: 'Clearing proofs from database...' });
+                const total = snap.docs.length;
+                let deleted = 0;
+                const chunkSize = 490;
+                for (let i = 0; i < snap.docs.length; i += chunkSize) {
+                    const chunk = snap.docs.slice(i, i + chunkSize);
+                    const batch = writeBatch(db);
+                    chunk.forEach(d => batch.delete(d.ref));
+                    await batch.commit();
+                    deleted += chunk.length;
+                    const percent = Math.round(72 + (deleted / total) * 23);
+                    setMaintenanceProgress({ phase: 'proofs', step: 'deleting', percent, label: `Deleted ${deleted} of ${total} proofs...` });
+                }
+
+                setMaintenanceProgress({ phase: 'proofs', step: 'deleting', percent: 96, label: 'Saving maintenance record...' });
+                await onUpdateConfig({
+                    maintenance: { ...maintenance, lastProofsReset: now.toISOString() }
+                });
+                setMaintenanceProgress({ phase: 'proofs', step: 'done', percent: 100, label: '✓ Proofs maintenance complete!' });
+                await new Promise(r => setTimeout(r, 1500));
+                setMaintenanceProgress(null);
                 setSuccessModal({
                     isOpen: true,
-                    title: "Proofs Cleared!",
-                    message: `All complaint proofs for the period ${maintenanceStatus.proofsPeriod} have been backed up and cleared.`
+                    title: 'Proofs Cleared! ✓',
+                    message: `${total} proofs backed up as ZIP and cleared from the database. Next reminder next Sunday.`
                 });
-                toast.success("Proofs cleared successfully!");
             }
         } catch (error) {
-            console.error(error);
-            toast.error("Cleanup failed. Please try again.");
-        } finally {
-            setShowBouncingLogo(false);
+            console.error('Maintenance error:', error);
+            setMaintenanceProgress(null);
+            toast.error(`Maintenance failed: ${error.message || 'Unknown error'}`);
         }
     };
 
-
     const handleAllMaintenanceCleanup = async () => {
-        if (!maintenanceStatus.ratingsResetNeeded && !maintenanceStatus.proofsResetNeeded) {
-            toast.success("No maintenance required at the moment.");
-            return;
+        const status = checkMaintenanceStatus();
+        if (status.ratingsNeeded) {
+            await handleMaintenanceCleanup('ratings');
         }
-        try {
-            setShowBouncingLogo(true);
-            if (maintenanceStatus.ratingsResetNeeded) {
-                await handleMaintenanceCleanup('ratings');
-            }
-            if (maintenanceStatus.proofsResetNeeded) {
-                await handleMaintenanceCleanup('proofs');
-            }
-        } finally {
-            setShowBouncingLogo(false);
+        if (status.proofsNeeded) {
+            await handleMaintenanceCleanup('proofs');
+        }
+        if (!status.ratingsNeeded && !status.proofsNeeded) {
+            toast('No maintenance due right now.', { icon: 'ℹ️' });
         }
     };
 
@@ -1370,37 +1430,37 @@ export const AdminDashboard = ({ user, userData, onLogout, onSwitchToUser, confi
                                         </div>
                                     )}
                                 </div>
+                            </div>
 
-                                {/* Pending Issues Card */}
-                                <div className="flex flex-col h-[380px] bg-white dark:bg-[#16162A] rounded-2xl border border-[#EEEEEE] dark:border-[#1E1E35] p-5 shadow-[0_2px_12px_rgba(0,0,0,0.06)] dark:shadow-none">
-                                    <div className="flex justify-between items-center mb-4">
-                                        <h3 className="font-heading font-bold text-[#0D0D0D] dark:text-[#F0F0FF] text-base">Pending Issues</h3>
-                                        <button onClick={() => setActiveTab('proofs')} className="text-xs font-bold text-[#2E7D32] dark:text-[#7C3AED] hover:underline">View All</button>
-                                    </div>
-                                    <div className="space-y-3 overflow-y-auto flex-grow scrollbar-hide pr-1">
-                                        {isLoadingProofs ? (
-                                            [1, 2, 3].map(i => <div key={i} className="h-20 w-full bg-[#FFF8E1] dark:bg-[#2A2210] animate-pulse rounded-xl border border-[#F57F17]/20" />)
-                                        ) : proofs.filter(p => p.status === 'Pending').slice(0, 5).map(p => (
-                                            <div key={p.id} className="p-3 rounded-xl border transition-colors bg-[#FFF8E1] border-[#F57F17]/20 dark:bg-[#2A2210] dark:border-[#FBBF24]/20 hover:border-[#F57F17]/40 dark:hover:border-[#FBBF24]/40">
-                                                <div className="flex justify-between items-start">
-                                                    <div>
-                                                        <p className="font-semibold text-[#F57F17] dark:text-[#FBBF24] text-sm mb-0.5">{p.session} · {p.date}</p>
-                                                        <p className="text-xs font-medium text-[#6B6B6B] dark:text-[#8B8BAD]">{p.studentName}</p>
-                                                    </div>
-                                                    <span className="text-[10px] font-black uppercase px-2 py-0.5 rounded-full bg-[#FFF8E1] dark:bg-[#2A2210] text-[#F57F17] dark:text-[#FBBF24] border border-[#F57F17]/30 dark:border-[#FBBF24]/30">Pending</span>
+                            {/* Pending Issues Card */}
+                            <div className="flex flex-col h-[380px] bg-white dark:bg-[#16162A] rounded-2xl border border-[#EEEEEE] dark:border-[#1E1E35] p-5 shadow-[0_2px_12px_rgba(0,0,0,0.06)] dark:shadow-none">
+                                <div className="flex justify-between items-center mb-4">
+                                    <h3 className="font-heading font-bold text-[#0D0D0D] dark:text-[#F0F0FF] text-base">Pending Issues</h3>
+                                    <button onClick={() => setActiveTab('proofs')} className="text-xs font-bold text-[#2E7D32] dark:text-[#7C3AED] hover:underline">View All</button>
+                                </div>
+                                <div className="space-y-3 overflow-y-auto flex-grow scrollbar-hide pr-1">
+                                    {isLoadingProofs ? (
+                                        [1, 2, 3].map(i => <div key={i} className="h-20 w-full bg-[#FFF8E1] dark:bg-[#2A2210] animate-pulse rounded-xl border border-[#F57F17]/20" />)
+                                    ) : proofs.filter(p => !p.status || p.status === 'Pending').slice(0, 5).map(p => (
+                                        <div key={p.id} className="p-3 rounded-xl border transition-colors bg-[#FFF8E1] border-[#F57F17]/20 dark:bg-[#2A2210] dark:border-[#FBBF24]/20 hover:border-[#F57F17]/40 dark:hover:border-[#FBBF24]/40">
+                                            <div className="flex justify-between items-start">
+                                                <div>
+                                                    <p className="font-semibold text-[#F57F17] dark:text-[#FBBF24] text-sm mb-0.5">{p.session} · {p.date}</p>
+                                                    <p className="text-xs font-medium text-[#6B6B6B] dark:text-[#8B8BAD]">{p.studentName}</p>
                                                 </div>
+                                                <span className="text-[10px] font-black uppercase px-2 py-0.5 rounded-full bg-[#FFF8E1] dark:bg-[#2A2210] text-[#F57F17] dark:text-[#FBBF24] border border-[#F57F17]/30 dark:border-[#FBBF24]/30">Pending</span>
                                             </div>
-                                        ))}
-                                        {proofs.filter(p => p.status === 'Pending').length === 0 && (
-                                            <div className="flex flex-col items-center justify-center h-full text-[#A0A0A0] space-y-2">
-                                                <Check size={28} className="opacity-40 text-[#2E7D32] dark:text-[#4ADE80]" />
-                                                <p className="text-xs font-bold uppercase tracking-widest">All issues resolved</p>
-                                            </div>
-                                        )}
-                                    </div>
+                                        </div>
+                                    ))}
+                                    {proofs.filter(p => !p.status || p.status === 'Pending').length === 0 && (
+                                        <div className="flex flex-col items-center justify-center h-full text-[#A0A0A0] space-y-2">
+                                            <Check size={28} className="opacity-40 text-[#2E7D32] dark:text-[#4ADE80]" />
+                                            <p className="text-xs font-bold uppercase tracking-widest">All issues resolved</p>
+                                        </div>
+                                    )}
                                 </div>
                             </div>
-                        </div>  {/* end space-y-8 */}
+                        </div>  {/* end grid md:grid-cols-2 */}
                     </div>
                 );
             }
@@ -1704,9 +1764,17 @@ export const AdminDashboard = ({ user, userData, onLogout, onSwitchToUser, confi
                                     <div>
                                         <h4 className="font-heading font-bold text-[#2E7D32] dark:text-[#A78BFA] text-lg tracking-tight">{notice.title}</h4>
                                         <p className="text-sm text-zinc-600 dark:text-zinc-300 mt-2 whitespace-pre-wrap leading-relaxed max-w-2xl">{notice.message}</p>
-                                        <p className="text-xs font-bold text-zinc-400 dark:text-zinc-500 uppercase tracking-widest mt-4">
-                                            {notice.createdAt?.toDate?.().toLocaleDateString?.() || 'Recently'}
-                                        </p>
+                                        <div className="flex items-center justify-between mt-4">
+                                            <p className="text-xs font-bold text-zinc-400 dark:text-zinc-500 uppercase tracking-widest">
+                                                Posted: {notice.createdAt?.toDate?.().toLocaleDateString?.() || 'Recently'}
+                                            </p>
+                                            {notice.expiresAt && (
+                                                <p className="text-xs font-bold text-amber-500 uppercase tracking-widest">
+                                                    Expires: {new Date(notice.expiresAt + 'T00:00:00')
+                                                        .toLocaleDateString([], { day: 'numeric', month: 'short', year: 'numeric' })}
+                                                </p>
+                                            )}
+                                        </div>
                                     </div>
                                     <button
                                         onClick={() => deleteNotice(notice.id)}
@@ -2066,7 +2134,7 @@ export const AdminDashboard = ({ user, userData, onLogout, onSwitchToUser, confi
                                                 </div>
                                             </div>
                                             <Badge variant={proof.status === 'Resolved' ? 'success' : 'warning'} className="font-black text-[9px] px-2 py-0.5">
-                                                {proof.status.toUpperCase()}
+                                                {(proof.status || 'Pending').toUpperCase()}
                                             </Badge>
                                         </div>
                                         {proof.description && (
@@ -2075,7 +2143,7 @@ export const AdminDashboard = ({ user, userData, onLogout, onSwitchToUser, confi
                                             </div>
                                         )}
                                         <div className="mt-auto pt-6">
-                                            {proof.status === 'Pending' ? (
+                                            {(!proof.status || proof.status === 'Pending') ? (
                                                 <Button
                                                     onClick={() => resolveProof(proof.id)}
                                                     variant="secondary"
@@ -2165,7 +2233,7 @@ export const AdminDashboard = ({ user, userData, onLogout, onSwitchToUser, confi
                         <div className="flex flex-wrap gap-2 mb-6 p-2 bg-white dark:bg-[#16162A] border border-zinc-200 dark:border-white/10 rounded-2xl w-fit shadow-sm">
                             {[
                                 { id: 'all', label: 'All Users' },
-                                { id: 'pending', label: 'Pending Approval' },
+                                { id: 'revoked', label: 'Revoked' },
                                 { id: 'students', label: 'Students' },
                                 { id: 'faculty', label: 'Faculty' },
                                 { id: 'admins', label: 'Admins' }
@@ -2659,25 +2727,26 @@ export const AdminDashboard = ({ user, userData, onLogout, onSwitchToUser, confi
                                     System Maintenance
                                 </h3>
                                 <p className="text-xs font-medium text-zinc-600 dark:text-zinc-400 mb-4">
-                                    Use these tools at the end of each cycle to clean up old ratings/proofs. These actions no longer lock the admin interface.
+                                    Use these tools to archive and clean up data. Download happens BEFORE delete — data is never lost.
                                 </p>
 
                                 <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                                     <div className="bg-amber-50 dark:bg-amber-500/10 border border-amber-200 dark:border-amber-500/40 rounded-2xl p-4 flex flex-col gap-2">
                                         <h4 className="text-xs font-black uppercase tracking-widest text-amber-600 dark:text-amber-300">All Maintenance</h4>
                                         <p className="text-[11px] text-zinc-700 dark:text-zinc-300">
-                                            Runs both ratings reset and proofs cleanup if they are due.
+                                            Downloads ALL ratings and proofs as ZIP files then clears them.
                                         </p>
                                         <Button
                                             onClick={() => {
                                                 setConfirmModal({
                                                     isOpen: true,
                                                     title: 'Run Full Maintenance?',
-                                                    message: 'This will download ALL ratings and proofs as ZIP files, then permanently clear them from the database. This cannot be undone.',
+                                                    message: 'This downloads ALL ratings and proofs as ZIP files then clears them. Cannot be undone.',
                                                     isDestructive: true,
                                                     onConfirm: async () => {
-                                                        setConfirmModal({ ...confirmModal, isOpen: false });
-                                                        await handleAllMaintenanceCleanup();
+                                                        setConfirmModal(prev => ({ ...prev, isOpen: false }));
+                                                        await handleMaintenanceCleanup('ratings');
+                                                        await handleMaintenanceCleanup('proofs');
                                                     }
                                                 });
                                             }}
@@ -2690,17 +2759,17 @@ export const AdminDashboard = ({ user, userData, onLogout, onSwitchToUser, confi
                                     <div className="bg-zinc-50 dark:bg-black/20 border border-zinc-200 dark:border-white/10 rounded-2xl p-4 flex flex-col gap-2">
                                         <h4 className="text-xs font-black uppercase tracking-widest text-zinc-700 dark:text-zinc-300">Ratings Only</h4>
                                         <p className="text-[11px] text-zinc-600 dark:text-zinc-400">
-                                            Backup and clear rating data for the last period when required.
+                                            Downloads all ratings as ZIP backup then permanently deletes them.
                                         </p>
                                         <Button
                                             onClick={() => {
                                                 setConfirmModal({
                                                     isOpen: true,
                                                     title: 'Clear All Ratings?',
-                                                    message: 'This will download all ratings as a ZIP backup then permanently delete them.',
+                                                    message: 'Downloads all ratings as ZIP backup then permanently deletes them.',
                                                     isDestructive: true,
                                                     onConfirm: async () => {
-                                                        setConfirmModal({ ...confirmModal, isOpen: false });
+                                                        setConfirmModal(prev => ({ ...prev, isOpen: false }));
                                                         await handleMaintenanceCleanup('ratings');
                                                     }
                                                 });
@@ -2714,17 +2783,17 @@ export const AdminDashboard = ({ user, userData, onLogout, onSwitchToUser, confi
                                     <div className="bg-zinc-50 dark:bg-black/20 border border-zinc-200 dark:border-white/10 rounded-2xl p-4 flex flex-col gap-2">
                                         <h4 className="text-xs font-black uppercase tracking-widest text-zinc-700 dark:text-zinc-300">Proofs Only</h4>
                                         <p className="text-[11px] text-zinc-600 dark:text-zinc-400">
-                                            Backup and clear complaint proofs for the previous month.
+                                            Downloads all proofs as ZIP backup then permanently deletes them.
                                         </p>
                                         <Button
                                             onClick={() => {
                                                 setConfirmModal({
                                                     isOpen: true,
                                                     title: 'Clear All Proofs?',
-                                                    message: 'This will download all complaint proofs as a ZIP backup then permanently delete them.',
+                                                    message: 'Downloads all proofs as ZIP backup then permanently deletes them.',
                                                     isDestructive: true,
                                                     onConfirm: async () => {
-                                                        setConfirmModal({ ...confirmModal, isOpen: false });
+                                                        setConfirmModal(prev => ({ ...prev, isOpen: false }));
                                                         await handleMaintenanceCleanup('proofs');
                                                     }
                                                 });
@@ -2914,48 +2983,152 @@ export const AdminDashboard = ({ user, userData, onLogout, onSwitchToUser, confi
             <OfflineIndicator />
 
             {/* ── MAINTENANCE REMINDER POPUP (NON-BLOCKING) ───────────── */}
-            {maintenanceStatus.lock && showMaintenancePopup && (
-                <div className="fixed bottom-5 right-5 z-[90] w-full max-w-sm">
-                    <div className="bg-white dark:bg-zinc-900 border border-amber-500/30 rounded-2xl shadow-2xl p-5 space-y-3">
-                        <div className="flex items-start justify-between gap-3">
-                            <div className="flex items-center gap-2">
-                                <div className="p-2 rounded-xl bg-amber-500/10">
-                                    <ShieldAlert size={20} className="text-amber-500" />
+            {(maintenanceStatus.ratingsNeeded || maintenanceStatus.proofsNeeded) && showMaintenancePopup && (
+                <div className="fixed bottom-5 right-5 z-[90] w-full max-w-sm space-y-3">
+
+                    {maintenanceStatus.ratingsNeeded && (
+                        <div className="bg-white dark:bg-zinc-900 border border-amber-500/30 rounded-2xl shadow-2xl p-5">
+                            <div className="flex items-start justify-between gap-3 mb-3">
+                                <div className="flex items-center gap-2">
+                                    <div className="p-2 rounded-xl bg-amber-500/10">
+                                        <Star size={16} className="text-amber-500" />
+                                    </div>
+                                    <div>
+                                        <h3 className="text-sm font-black text-dark dark:text-white">
+                                            Monthly Ratings Cleanup
+                                        </h3>
+                                        <p className="text-[11px] text-zinc-500">
+                                            Ratings from last month are due for archiving.
+                                        </p>
+                                    </div>
                                 </div>
-                                <div>
-                                    <h3 className="text-sm font-heading font-black text-[#0D0D0D] dark:text-white tracking-tight">
-                                        Maintenance due soon
-                                    </h3>
-                                    <p className="text-[11px] text-zinc-600 dark:text-zinc-400 font-medium">
-                                        Some periodic maintenance tasks are pending. You can continue using the dashboard and run them from Settings when ready.
-                                    </p>
-                                </div>
+                                <button
+                                    onClick={() => setShowMaintenancePopup(false)}
+                                    className="text-zinc-400 hover:text-zinc-600 text-xs"
+                                >
+                                    <X size={14} />
+                                </button>
                             </div>
-                            <button
-                                onClick={() => setShowMaintenancePopup(false)}
-                                className="text-zinc-400 hover:text-zinc-600 dark:hover:text-white text-xs font-bold uppercase tracking-widest"
-                            >
-                                Close
-                            </button>
-                        </div>
-                        <div className="flex gap-2 mt-1">
                             <Button
                                 onClick={() => {
-                                    setActiveTab('settings');
                                     setShowMaintenancePopup(false);
+                                    setConfirmModal({
+                                        isOpen: true,
+                                        title: 'Run Ratings Maintenance?',
+                                        message: 'This will download all ratings as a ZIP backup then permanently delete them from the database.',
+                                        isDestructive: true,
+                                        onConfirm: async () => {
+                                            setConfirmModal(prev => ({ ...prev, isOpen: false }));
+                                            await handleMaintenanceCleanup('ratings');
+                                        }
+                                    });
                                 }}
-                                className="flex-1 py-2 text-xs font-bold"
+                                className="w-full py-2 text-xs font-bold bg-amber-500 hover:bg-amber-600 text-white"
                             >
-                                Go to Maintenance
-                            </Button>
-                            <Button
-                                variant="secondary"
-                                onClick={() => setShowMaintenancePopup(false)}
-                                className="px-3 py-2 text-[11px] font-bold"
-                            >
-                                Later
+                                Run Ratings Maintenance
                             </Button>
                         </div>
+                    )}
+
+                    {maintenanceStatus.proofsNeeded && (
+                        <div className="bg-white dark:bg-zinc-900 border border-blue-500/30 rounded-2xl shadow-2xl p-5">
+                            <div className="flex items-start justify-between gap-3 mb-3">
+                                <div className="flex items-center gap-2">
+                                    <div className="p-2 rounded-xl bg-blue-500/10">
+                                        <ImageIcon size={16} className="text-blue-500" />
+                                    </div>
+                                    <div>
+                                        <h3 className="text-sm font-black text-dark dark:text-white">
+                                            Weekly Proofs Cleanup
+                                        </h3>
+                                        <p className="text-[11px] text-zinc-500">
+                                            Today is Sunday — proofs are due for archiving.
+                                        </p>
+                                    </div>
+                                </div>
+                                <button
+                                    onClick={() => setShowMaintenancePopup(false)}
+                                    className="text-zinc-400 hover:text-zinc-600 text-xs"
+                                >
+                                    <X size={14} />
+                                </button>
+                            </div>
+                            <Button
+                                onClick={() => {
+                                    setShowMaintenancePopup(false);
+                                    setConfirmModal({
+                                        isOpen: true,
+                                        title: 'Run Proofs Maintenance?',
+                                        message: 'This will download all complaint proofs as a ZIP backup then permanently delete them from the database.',
+                                        isDestructive: true,
+                                        onConfirm: async () => {
+                                            setConfirmModal(prev => ({ ...prev, isOpen: false }));
+                                            await handleMaintenanceCleanup('proofs');
+                                        }
+                                    });
+                                }}
+                                className="w-full py-2 text-xs font-bold bg-blue-500 hover:bg-blue-600 text-white"
+                            >
+                                Run Proofs Maintenance
+                            </Button>
+                        </div>
+                    )}
+
+                </div>
+            )}
+
+            {/* ── MAINTENANCE PROGRESS OVERLAY ──────────────────────── */}
+            {maintenanceProgress !== null && (
+                <div className="fixed inset-0 z-[200] bg-black/70 backdrop-blur-sm flex items-center justify-center p-6">
+                    <div className="bg-white dark:bg-[#1A1A2E] rounded-3xl shadow-2xl p-8 w-full max-w-md border border-white/10">
+                        <div className="flex items-center gap-3 mb-6">
+                            <div className="w-12 h-12 rounded-2xl bg-primary/10 flex items-center justify-center">
+                                <ShieldAlert size={24} className="text-primary" />
+                            </div>
+                            <div>
+                                <h3 className="font-heading font-black text-lg text-dark dark:text-white tracking-tight">
+                                    System Maintenance
+                                </h3>
+                                <p className="text-xs text-zinc-500 font-medium capitalize">
+                                    {maintenanceProgress.phase} cleanup in progress
+                                </p>
+                            </div>
+                        </div>
+
+                        <div className="mb-4">
+                            <div className="flex justify-between items-center mb-2">
+                                <span className="text-xs font-bold text-zinc-500 uppercase tracking-widest">
+                                    {maintenanceProgress.step === 'fetching' && 'Fetching'}
+                                    {maintenanceProgress.step === 'downloading' && 'Preparing Download'}
+                                    {maintenanceProgress.step === 'deleting' && 'Clearing Database'}
+                                    {maintenanceProgress.step === 'done' && 'Complete'}
+                                </span>
+                                <span className="text-lg font-black text-primary tabular-nums">
+                                    {maintenanceProgress.percent}%
+                                </span>
+                            </div>
+                            <div className="w-full h-3 bg-zinc-100 dark:bg-white/10 rounded-full overflow-hidden">
+                                <div
+                                    className="h-full rounded-full transition-all duration-300 ease-out"
+                                    style={{
+                                        width: `${maintenanceProgress.percent}%`,
+                                        background: maintenanceProgress.step === 'done'
+                                            ? 'linear-gradient(90deg, #16a34a, #4ade80)'
+                                            : 'linear-gradient(90deg, #0057FF, #60a5fa)',
+                                    }}
+                                />
+                            </div>
+                        </div>
+
+                        <p className="text-sm text-zinc-600 dark:text-zinc-400 font-medium text-center mt-4 min-h-[20px]">
+                            {maintenanceProgress.label}
+                        </p>
+
+                        {maintenanceProgress.step !== 'done' && (
+                            <p className="text-[11px] text-amber-500 font-bold text-center mt-4 uppercase tracking-wider">
+                                ⚠ Do not close this tab
+                            </p>
+                        )}
                     </div>
                 </div>
             )}
