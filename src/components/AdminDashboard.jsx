@@ -329,6 +329,7 @@ export const AdminDashboard = ({ user, userData, onLogout, onSwitchToUser, confi
 
     // --- Actions ---
 
+
     const handleToggleGroupHostel = (hostel) => {
         setNewGroupHostels(prev =>
             prev.includes(hostel) ? prev.filter(h => h !== hostel) : [...prev, hostel]
@@ -834,6 +835,11 @@ export const AdminDashboard = ({ user, userData, onLogout, onSwitchToUser, confi
                 return toast.error("No valid targets found in selection");
             }
 
+            const mealKey = session.toLowerCase();
+            const itemsText = menuInputs[mealKey];
+            if (itemsText === undefined) return;
+            const newItems = itemsText.split('\n').map(i => i.trim()).filter(i => i);
+
             // Show success modal immediately before the loop of writes
             setSuccessModal({
                 isOpen: true,
@@ -854,20 +860,51 @@ export const AdminDashboard = ({ user, userData, onLogout, onSwitchToUser, confi
                     const docRef = doc(db, 'artifacts', appId, 'public', 'data', 'menus', docId);
 
                     const menuSnap = await getDoc(docRef);
-                    let monthData = { hostel, messType, year, month, days: [] };
+                    let monthData = { hostel, messType: mType, year, month, days: [] };
                     if (menuSnap.exists()) monthData = menuSnap.data();
 
-                    const days = [...(monthData.days || [])];
-                    let dayIdx = days.findIndex(d => d.dates?.includes(dayNum));
+                    let days = [...(monthData.days || [])];
+                    const dayIdx = days.findIndex(d => d.dates?.includes(dayNum));
 
                     if (dayIdx >= 0) {
-                        days[dayIdx][session.toLowerCase()] = menuInputs[session.toLowerCase()];
+                        const existingGroup = days[dayIdx];
+                        if (existingGroup.dates.length > 1) {
+                            // Split group
+                            const updatedOldGroup = {
+                                ...existingGroup,
+                                dates: existingGroup.dates.filter(d => d !== dayNum)
+                            };
+                            updatedOldGroup.dateLabel = `${updatedOldGroup.dayAbbr} ${updatedOldGroup.dates.join(', ')}`;
+                            
+                            const dayAbbr = dObj.toLocaleString('en-US', { weekday: 'short' });
+                            const newDayGroup = {
+                                ...existingGroup,
+                                dateLabel: `${dayAbbr} ${dayNum}`,
+                                dayAbbr,
+                                dates: [dayNum]
+                            };
+                            newDayGroup[mealKey] = newItems;
+
+                            days[dayIdx] = updatedOldGroup;
+                            days.push(newDayGroup);
+                        } else {
+                            days[dayIdx][mealKey] = newItems;
+                        }
                     } else {
+                        const dayAbbr = dObj.toLocaleString('en-US', { weekday: 'short' });
                         days.push({
+                            dateLabel: `${dayAbbr} ${dayNum}`,
+                            dayAbbr: dayAbbr,
                             dates: [dayNum],
-                            [session.toLowerCase()]: menuInputs[session.toLowerCase()],
+                            breakfast: mealKey === 'breakfast' ? newItems : [],
+                            lunch: mealKey === 'lunch' ? newItems : [],
+                            snacks: mealKey === 'snacks' ? newItems : [],
+                            dinner: mealKey === 'dinner' ? newItems : []
                         });
                     }
+
+                    // Sort chronically to keep document clean
+                    days.sort((a, b) => Math.min(...(a.dates || [99])) - Math.min(...(b.dates || [99])));
 
                     await setDoc(docRef, { ...monthData, days, updatedAt: serverTimestamp() }, { merge: true });
                 }
