@@ -214,11 +214,12 @@ export const UserDashboard = ({ user, userData, onLogout, onSwitchToAdmin, canSw
         const q = query(
             collection(db, 'artifacts', appId, 'public', 'data', 'proofs'),
             where('studentId', '==', user.uid),
-            orderBy('createdAt', 'desc'),
             limit(15)
         );
         const unsub = onSnapshot(q, (snap) => {
-            setUserActivity(snap.docs.map(d => ({ id: d.id, ...d.data() })));
+            const data = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+            data.sort((a, b) => b.createdAt - a.createdAt);
+            setUserActivity(data);
         }, (err) => console.error("Activity fetch error:", err));
         return () => unsub();
     }, [user?.uid, activeTab]);

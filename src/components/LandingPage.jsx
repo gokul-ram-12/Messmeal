@@ -24,6 +24,14 @@ const ROLE_META = {
         accentDark: '#D4F000',
         emailPlaceholder: 'name@vitap.ac.in',
         description: 'Use your @vitap.ac.in or @vit.ac.in email',
+    },
+    admin: {
+        label: 'Admin',
+        Icon: Shield,
+        accentLight: '#EAB308',
+        accentDark: '#EAB308',
+        emailPlaceholder: 'admin@vitap.ac.in',
+        description: 'Authorized Admin Access',
     }
 };
 

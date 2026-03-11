@@ -92,13 +92,20 @@ const App = () => {
 
   // Fetch Config
   useEffect(() => {
-    const unsub = onSnapshot(doc(db, 'artifacts', appId, 'config', 'settings'), (doc) => {
-      if (doc.exists()) {
-        setConfig(doc.data());
-      }
-    });
-    return () => unsub();
-  }, []);
+    let unsub = null;
+    if (user) {
+      unsub = onSnapshot(doc(db, 'artifacts', appId, 'config', 'settings'), (doc) => {
+        if (doc.exists()) {
+          setConfig(doc.data());
+        }
+      });
+    } else {
+      setConfig(null); // Clear config on logout
+    }
+    return () => {
+      if (unsub) unsub();
+    };
+  }, [user]);
 
   const onUpdateConfig = async (updates) => {
     try {

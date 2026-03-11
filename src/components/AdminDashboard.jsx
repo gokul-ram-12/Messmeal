@@ -2288,8 +2288,8 @@ export const AdminDashboard = ({ user, userData, onLogout, onSwitchToUser, confi
                                                     <div className="text-sm font-medium text-zinc-500 dark:text-zinc-400 mt-1">{u.email}</div>
                                                 </td>
                                                 <td className="p-5">
-                                                    <Badge variant={u.role}>
-                                                        {u.role.replace('_', ' ')}
+                                                    <Badge variant={u.role || 'student'}>
+                                                        {(u.role || 'Unassigned').replace('_', ' ')}
                                                     </Badge>
                                                 </td>
                                                 <td className="p-5">
