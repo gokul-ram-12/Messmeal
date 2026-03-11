@@ -1315,7 +1315,7 @@ export const UserDashboard = ({ user, userData, onLogout, onSwitchToAdmin, canSw
 
             <SuccessModal
                 isOpen={successModal.isOpen}
-                onClose={() => setSuccessModal({ ...successModal, isOpen: false })}
+                onConfirm={() => setSuccessModal({ ...successModal, isOpen: false })}
                 title={successModal.title}
                 message={successModal.message}
             />
