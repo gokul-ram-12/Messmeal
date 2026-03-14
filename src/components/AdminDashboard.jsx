@@ -126,7 +126,6 @@ export const AdminDashboard = ({ user, userData, onLogout, onSwitchToUser, confi
     const [newMessGroupTypes, setNewMessGroupTypes] = useState([]);
     const [newTagline, setNewTagline] = useState(config?.tagline || '');
     const [newApiKey, setNewApiKey] = useState(config?.geminiApiKey || '');
-    const [newCalorieApiKey, setNewCalorieApiKey] = useState(config?.calorieNinjasApiKey || '');
     const [autoApprove, setAutoApprove] = useState(config?.autoApproveDomainUsers ?? true);
     const [newOwnerEmail, setNewOwnerEmail] = useState('');
 
@@ -702,19 +701,20 @@ export const AdminDashboard = ({ user, userData, onLogout, onSwitchToUser, confi
         } catch (e) { toast.error("Failed to update tagline"); }
     };
 
-    const updateApiKey = async (type) => {
+    const updateApiKey = async () => {
         try {
-            const field = type === 'gemini' ? 'geminiApiKey' : 'calorieNinjasApiKey';
-            const val = type === 'gemini' ? newApiKey.trim() : newCalorieApiKey.trim();
-            await setDoc(doc(db, 'artifacts', appId, 'config', 'settings'), { [field]: val }, { merge: true });
-            await onUpdateConfig({ [field]: val });
+            const val = newApiKey.trim();
+            if (!val) return toast.error('Please enter a valid API key.');
+            await setDoc(doc(db, 'artifacts', appId, 'config', 'settings'),
+                { geminiApiKey: val }, { merge: true });
+            await onUpdateConfig({ geminiApiKey: val });
             setSuccessModal({
                 isOpen: true,
-                title: "API Key Updated!",
-                message: `${type === 'gemini' ? 'Gemini AI' : 'CalorieNinjas'} API key has been securely updated.`
+                title: 'API Key Updated!',
+                message: 'Gemini AI API key has been securely updated.'
             });
-            toast.success(`${type === 'gemini' ? 'Gemini' : 'CalorieNinjas'} API Key updated successfully!`);
-        } catch (e) { toast.error("Failed to update API Key"); }
+            toast.success('Gemini API Key updated successfully!');
+        } catch (e) { toast.error('Failed to update API Key'); }
     };
 
     const toggleAutoApproval = async () => {
@@ -898,7 +898,7 @@ export const AdminDashboard = ({ user, userData, onLogout, onSwitchToUser, confi
                                 dates: existingGroup.dates.filter(d => d !== dayNum)
                             };
                             updatedOldGroup.dateLabel = `${updatedOldGroup.dayAbbr} ${updatedOldGroup.dates.join(', ')}`;
-                            
+
                             const dayAbbr = dObj.toLocaleString('en-US', { weekday: 'short' });
                             const newDayGroup = {
                                 ...existingGroup,
@@ -1005,11 +1005,11 @@ export const AdminDashboard = ({ user, userData, onLogout, onSwitchToUser, confi
         } catch (error) {
             console.error('Upload failed:', error);
             if (error?.code === 'permission-denied') {
-              toast.error('Permission denied — check Firestore security rules.');
+                toast.error('Permission denied — check Firestore security rules.');
             } else if (error?.message?.includes('timed out')) {
-              toast.error('Upload timed out — check your Firestore rules allow admin writes.');
+                toast.error('Upload timed out — check your Firestore rules allow admin writes.');
             } else {
-              toast.error(`Upload failed: ${error?.message || 'Unknown error'}`);
+                toast.error(`Upload failed: ${error?.message || 'Unknown error'}`);
             }
         } finally {
             toast.dismiss(uploadToast);
@@ -1598,7 +1598,7 @@ export const AdminDashboard = ({ user, userData, onLogout, onSwitchToUser, confi
                                         className="w-full p-5 bg-zinc-100 dark:bg-black/40 border border-zinc-200 dark:border-white/10 rounded-2xl text-sm outline-none focus:border-amber-500 h-[400px] resize-none transition-all leading-relaxed"
                                     />
                                     <div className="flex justify-end">
-                                        <Button 
+                                        <Button
                                             onClick={() => {
                                                 setConfirmModal({
                                                     isOpen: true,
@@ -2673,35 +2673,16 @@ export const AdminDashboard = ({ user, userData, onLogout, onSwitchToUser, confi
                                             type="password"
                                             value={newApiKey}
                                             onChange={(e) => setNewApiKey(e.target.value)}
-                                            placeholder="Enter Gemini API Key(s)..."
+                                            placeholder="AIzaSy... or key1, key2, key3 for multiple keys"
                                             className="flex-1 p-3 bg-zinc-100 dark:bg-black/40 border border-zinc-200 dark:border-white/10 rounded-xl outline-none focus:border-[#2E7D32] dark:focus:border-[#7C3AED] focus:ring-2 focus:ring-[#2E7D32]/20 text-zinc-900 dark:text-white placeholder-zinc-500 transition-colors shadow-inner"
                                         />
-                                        <Button onClick={() => updateApiKey('gemini')} className="bg-[#2E7D32] dark:bg-[#7C3AED] text-white hover:opacity-90 shadow-md">
+                                        <Button onClick={() => updateApiKey()} className="bg-[#2E7D32] dark:bg-[#7C3AED] text-white hover:opacity-90 shadow-md">
                                             Save Gemini Key
                                         </Button>
                                     </div>
-                                    <p className="text-xs text-zinc-500 font-medium mt-1">
-                                        Required for advanced meal analysis and tips. You can paste multiple keys separated by commas.
-                                    </p>
-                                </div>
-
-                                {/* CalorieNinjas Config */}
-                                <div className="space-y-4 pt-6 border-t border-zinc-200 dark:border-white/10">
-                                    <label className="text-xs font-bold text-[#6B6B6B] dark:text-[#8B8BAD] uppercase tracking-widest block">CalorieNinjas API Key (Nutrition Data)</label>
-                                    <div className="flex flex-col sm:flex-row gap-3">
-                                        <input
-                                            type="password"
-                                            value={newCalorieApiKey}
-                                            onChange={(e) => setNewCalorieApiKey(e.target.value)}
-                                            placeholder="Enter CalorieNinjas API Key..."
-                                            className="flex-1 p-3 bg-zinc-100 dark:bg-black/40 border border-zinc-200 dark:border-white/10 rounded-xl outline-none focus:border-[#2E7D32] dark:focus:border-[#7C3AED] focus:ring-2 focus:ring-[#2E7D32]/20 text-zinc-900 dark:text-white placeholder-zinc-500 transition-colors shadow-inner"
-                                        />
-                                        <Button onClick={() => updateApiKey('calorie')} className="bg-[#2E7D32] dark:bg-[#7C3AED] text-white hover:opacity-90 shadow-md">
-                                            Save Calorie Key
-                                        </Button>
-                                    </div>
-                                    <p className="text-xs text-zinc-500 font-medium mt-1">
-                                        Required for primary nutritional data extraction.
+                                    <p className="text-[11px] text-zinc-400 mt-2">
+                                        💡 Paste multiple keys separated by commas to distribute
+                                        load and avoid rate limits. A random key is picked each request.
                                     </p>
                                 </div>
 

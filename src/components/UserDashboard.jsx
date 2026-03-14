@@ -17,7 +17,7 @@ import { MenuGrid } from './MenuGrid';
 import { FoodLimitsView } from './FoodLimitsView';
 import { ProfileSetupScreen } from './ProfileSetup';
 import { SuccessModal } from './ui/SuccessModal';
-import { callGemini, callCalorieNinjas, getMealStatus, getTimeMinutes, compressImage } from '../lib/utils';
+import { callGemini, getMealStatus, getTimeMinutes, compressImage } from '../lib/utils';
 import { DEFAULT_MEAL_TIMINGS, MEAL_ORDER, DEFAULT_RATING_WINDOW, DEFAULT_TAGLINE, MEAL_ACCENTS } from '../lib/constants';
 import { UnifiedFeedbackModal } from './UnifiedFeedbackModal';
 
@@ -392,24 +392,27 @@ export const UserDashboard = ({ user, userData, onLogout, onSwitchToAdmin, canSw
     const handleNutritionAnalysis = async (meal, menuText) => {
         setAiLoading(meal);
         try {
-            // Step 1 — CalorieNinjas for raw numbers
-            const nutritionData = await callCalorieNinjas(
-                menuText,
-                config?.calorieNinjasApiKey
-            );
-
-            // Step 2 — Gemini for AI tip (only if key exists)
-            let aiTip = '';
-            if (config?.geminiApiKey) {
-                const geminiPrompt = `Given this meal: "${menuText}", and nutrition data: "${nutritionData}", give a 1-sentence health tip about this meal. Be concise and friendly.`;
-                aiTip = await callGemini(geminiPrompt, config.geminiApiKey);
+            if (!config?.geminiApiKey) {
+                setNutritionTips(prev => ({
+                    ...prev,
+                    [meal]: 'Nutrition analysis not configured. Admin must add a Gemini API key in Settings.'
+                }));
+                setAiLoading(null);
+                return;
             }
 
-            const combined = aiTip
-                ? `${nutritionData}\n💡 ${aiTip}`
-                : nutritionData;
+            const geminiPrompt = `You are a nutrition expert familiar with Indian college mess food.
+Analyze this meal: "${menuText}"
 
-            if (combined) setNutritionTips(prev => ({ ...prev, [meal]: combined }));
+Give a response in exactly this format:
+Est. [X] kcal | P: [X]g, C: [X]g, F: [X]g
+💡 [One friendly health tip about this meal in 1 sentence]
+
+Base estimates on typical Indian college serving sizes.
+Keep the health tip short, practical and encouraging.`;
+
+            const result = await callGemini(geminiPrompt, config.geminiApiKey);
+            setNutritionTips(prev => ({ ...prev, [meal]: result }));
         } catch (e) {
             setNutritionTips(prev => ({
                 ...prev,
