@@ -254,6 +254,19 @@ const App = () => {
       } else {
         const existingData = userSnap.data();
 
+        if (!existingData.email) {
+          await updateDoc(userRef, { email });
+        }
+
+        if (!existingData.role) {
+          const fixedRole = isStudentDomain ? 'student' :
+                            isFacultyDomain ? 'faculty' : 'student';
+          await updateDoc(userRef, {
+            role: fixedRole,
+            approved: true
+          });
+        }
+
         // Force refresh super_admin role if email matches
         if (isSuperAdminEmail && (existingData.role !== 'super_admin' || !existingData.approved)) {
           await updateDoc(userRef, { role: 'super_admin', approved: true });

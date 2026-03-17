@@ -15,6 +15,8 @@ export const ProfileSetupScreen = ({ user, userData, onComplete, theme = 'orange
     const [loading, setLoading] = useState(false);
     const [step, setStep] = useState(1);
     const [studyingYear, setStudyingYear] = useState(userData?.studyingYear || '1');
+    const [registrationId, setRegistrationId] = useState(userData?.registrationId || '');
+    const [registrationIdError, setRegistrationIdError] = useState('');
 
     const handleSubmit = async () => {
         if (!name.trim()) {
@@ -27,7 +29,8 @@ export const ProfileSetupScreen = ({ user, userData, onComplete, theme = 'orange
             hostel: String(hostel).trim().toUpperCase(),
             messType: String(messType).trim().toUpperCase(),
             avatar,
-            studyingYear
+            registrationId: registrationId.trim().toUpperCase(),
+            ...(userData?.role !== 'faculty' && { studyingYear })
         };
         await onComplete(payload);
         setLoading(false);
@@ -77,11 +80,59 @@ export const ProfileSetupScreen = ({ user, userData, onComplete, theme = 'orange
                                     {user?.email}
                                 </div>
                             </div>
+
+                            <div>
+                                <label className="block text-[10px] font-black text-primary uppercase tracking-[0.2em] mb-1 opacity-70">
+                                    {userData?.role === 'faculty' ? 'Employee ID' : 'Registration Number'}
+                                </label>
+                                <input
+                                    type="text"
+                                    value={registrationId}
+                                    onChange={(e) => {
+                                        const val = e.target.value.toUpperCase();
+                                        setRegistrationId(val);
+                                        setRegistrationIdError('');
+                                    }}
+                                    placeholder={userData?.role === 'faculty' ? 'e.g. EMP1234' : 'e.g. 23BCE7846'}
+                                    className="w-full bg-slate-50 dark:bg-black/20 border-b-2 border-primary/40 focus:border-primary text-dark dark:text-white text-lg py-3 px-1 font-bold outline-none transition-colors"
+                                />
+                                {registrationIdError && (
+                                    <p className="text-[11px] text-red-500 mt-1 font-bold">
+                                        {registrationIdError}
+                                    </p>
+                                )}
+                                {userData?.role !== 'faculty' && (
+                                    <p className="text-[10px] text-zinc-400 mt-1 font-medium italic">
+                                        Format: 23BCE7846 (2 digits + 3 letters + 4-5 digits)
+                                    </p>
+                                )}
+                            </div>
                         </div>
                         <Button
                             onClick={() => {
-                                if (name.trim()) setStep(2);
-                                else toast.error("Please enter your name");
+                                if (!name.trim()) {
+                                    toast.error("Please enter your name");
+                                    return;
+                                }
+
+                                if (userData?.role !== 'faculty') {
+                                    const regPattern = /^\d{2}[A-Z]{3}\d{4,5}$/;
+                                    if (!registrationId.trim()) {
+                                        setRegistrationIdError('Registration number is required.');
+                                        return;
+                                    }
+                                    if (!regPattern.test(registrationId.trim())) {
+                                        setRegistrationIdError('Invalid format. Use format like 23BCE7846');
+                                        return;
+                                    }
+                                } else {
+                                    if (!registrationId.trim()) {
+                                        setRegistrationIdError('Employee ID is required.');
+                                        return;
+                                    }
+                                }
+
+                                setStep(2);
                             }}
                             className="w-full py-3.5"
                             disabled={!name.trim()}
@@ -121,20 +172,22 @@ export const ProfileSetupScreen = ({ user, userData, onComplete, theme = 'orange
                             </div>
                         </div>
 
-                        <div>
-                            <label className="block text-sm font-bold text-zinc-500 uppercase tracking-widest mb-4">Studying Year</label>
-                            <div className="flex gap-2">
-                                {['1', '2', '3', '4', '5'].map(year => (
-                                    <button
-                                        key={year}
-                                        onClick={() => !isReadOnly && setStudyingYear(year)}
-                                        className={`flex-1 p-3 rounded-xl text-sm font-bold transition-all border ${isReadOnly ? 'cursor-default' : ''} ${studyingYear === year ? 'bg-primary/20 text-primary border-primary' : 'bg-black/5 dark:bg-white/5 border-transparent'}`}
-                                    >
-                                        {year}
-                                    </button>
-                                ))}
+                        {userData?.role !== 'faculty' && (
+                            <div>
+                                <label className="block text-sm font-bold text-zinc-500 uppercase tracking-widest mb-4">Studying Year</label>
+                                <div className="flex gap-2">
+                                    {['1', '2', '3', '4', '5'].map(year => (
+                                        <button
+                                            key={year}
+                                            onClick={() => !isReadOnly && setStudyingYear(year)}
+                                            className={`flex-1 p-3 rounded-xl text-sm font-bold transition-all border ${isReadOnly ? 'cursor-default' : ''} ${studyingYear === year ? 'bg-primary/20 text-primary border-primary' : 'bg-black/5 dark:bg-white/5 border-transparent'}`}
+                                        >
+                                            {year}
+                                        </button>
+                                    ))}
+                                </div>
                             </div>
-                        </div>
+                        )}
 
                         <div className="flex gap-4 pt-4">
                             <Button onClick={() => setStep(1)} variant="secondary" className="flex-1">Back</Button>

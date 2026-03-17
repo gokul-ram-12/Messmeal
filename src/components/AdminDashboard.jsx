@@ -3,7 +3,7 @@ import { motion } from 'framer-motion';
 import { collection, query, onSnapshot, doc, getDoc, updateDoc, setDoc, deleteDoc, serverTimestamp, writeBatch, getDocs, where, orderBy, limit, addDoc } from 'firebase/firestore';
 import { db, appId } from '../lib/firebase';
 import { sendAdminNotificationEmail } from '../lib/mailer';
-import { LayoutDashboard, Users, Utensils, Megaphone, FileSpreadsheet, Settings, LogOut, Search, Check, X, Bell, Crown, Save, Calendar, BarChart3, ChevronRight, Menu as MenuIcon, AlertTriangle, Star, ImageIcon, Eye, Download, Shield, User, Clock4, PlusCircle, Trash2, RefreshCw, Globe, MessageSquare, CheckCircle2, Sparkles, ShieldAlert, ShieldCheck, FileText, Menu } from 'lucide-react';
+import { LayoutDashboard, Users, Utensils, Megaphone, FileSpreadsheet, Settings, LogOut, Search, Check, X, Bell, Crown, Save, Calendar, BarChart3, ChevronRight, Menu as MenuIcon, AlertTriangle, Star, ImageIcon, Eye, Download, Shield, User, Clock4, PlusCircle, Trash2, RefreshCw, Globe, MessageSquare, CheckCircle2, Sparkles, ShieldAlert, ShieldCheck, FileText, Menu, Bug } from 'lucide-react';
 import * as XLSX from 'xlsx';
 import JSZip from 'jszip';
 import { toast } from 'react-hot-toast';
@@ -83,6 +83,7 @@ export const AdminDashboard = ({ user, userData, onLogout, onSwitchToUser, confi
     const [searchQuery, setSearchQuery] = useState('');
     const [userFilter, setUserFilter] = useState('all'); // all, pending, students, faculty, admins
     const [feedbackSubTab, setFeedbackSubTab] = useState('ratings'); // ratings, suggestions
+    const [reportStatusFilter, setReportStatusFilter] = useState('All');
     const [selectedImage, setSelectedImage] = useState(null);
 
     // Proof filters state
@@ -499,25 +500,48 @@ export const AdminDashboard = ({ user, userData, onLogout, onSwitchToUser, confi
                 throw new Error('Only VIT-AP institutional emails can be made admin.');
             }
 
-            const q = query(collection(db, 'artifacts', appId, 'users'), where('email', '==', email), limit(1));
+            // Try query by email field first
+            let userDocRef = null;
+            let userData = null;
+
+            const q = query(
+                collection(db, 'artifacts', appId, 'users'),
+                where('email', '==', email),
+                limit(1)
+            );
             const snap = await getDocs(q);
 
-            if (snap.empty) {
-                throw new Error("User not found. They must sign in once to register before you can make them an Admin.");
+            if (!snap.empty) {
+                userDocRef = doc(db, 'artifacts', appId, 'users', snap.docs[0].id);
+                userData = snap.docs[0].data();
+            } else {
+                // Fallback: scan all users and match by email field
+                // (handles old users who may have email stored differently)
+                const allSnap = await getDocs(
+                    collection(db, 'artifacts', appId, 'users')
+                );
+                const match = allSnap.docs.find(d =>
+                    (d.data().email || '').toLowerCase() === email
+                );
+                if (match) {
+                    userDocRef = doc(db, 'artifacts', appId, 'users', match.id);
+                    userData = match.data();
+                }
             }
 
-            const userDoc = snap.docs[0];
-            const userData = userDoc.data();
+            if (!userDocRef) {
+                throw new Error('User not found. They must sign in at least once before you can make them an Admin.');
+            }
 
             if (userData.role === 'admin' || userData.role === 'super_admin') {
-                throw new Error("User is already an Admin or Super Admin.");
+                throw new Error('User is already an Admin or Super Admin.');
             }
 
-            // BUG 1 FIX: Set approved: true and adminApproved: true when granting admin role
-            await updateDoc(doc(db, 'artifacts', appId, 'users', userDoc.id), {
+            await updateDoc(userDocRef, {
                 role: 'admin',
                 approved: true,
                 adminApproved: true,
+                email: email,
                 updatedAt: serverTimestamp()
             });
             await sendAdminNotificationEmail(email, 'Admin', 'ADD_ADMIN');
@@ -849,6 +873,27 @@ export const AdminDashboard = ({ user, userData, onLogout, onSwitchToUser, confi
         } catch { toast.error("Failed to update report"); }
     };
 
+    const deleteReport = (id) => {
+        setConfirmModal({
+            isOpen: true,
+            title: 'Delete Report?',
+            message: 'This will permanently delete this resolved report from the database.',
+            isDestructive: true,
+            onConfirm: async () => {
+                setConfirmModal(prev => ({ ...prev, isOpen: false }));
+                try {
+                    await deleteDoc(
+                        doc(db, 'artifacts', appId,
+                            'public', 'data', 'feedback_reports', id)
+                    );
+                    toast.success('Report deleted.');
+                } catch {
+                    toast.error('Failed to delete report.');
+                }
+            }
+        });
+    };
+
     const updateMenuSession = async (session) => {
         try {
             const targetHostels = getTargetHostels(menuHostel);
@@ -1111,6 +1156,7 @@ export const AdminDashboard = ({ user, userData, onLogout, onSwitchToUser, confi
         { id: 'menus', label: 'Menu Management', icon: Calendar },
         { id: 'notices', label: 'Notices', icon: Megaphone },
         { id: 'feedback', label: 'Feedback', icon: Star },
+        { id: 'reports', label: 'Bugs & Suggestions', icon: Bug },
         { id: 'proofs', label: 'Proofs Gallery', icon: ImageIcon },
         { id: 'users', label: 'User Management', icon: Users },
         { id: 'settings', label: 'Settings', icon: Settings },
@@ -1188,7 +1234,22 @@ export const AdminDashboard = ({ user, userData, onLogout, onSwitchToUser, confi
             if (type === 'ratings') {
                 setMaintenanceProgress({ phase: 'ratings', step: 'fetching', percent: 5, label: 'Fetching ratings from database...' });
                 const snap = await getDocs(query(collection(db, 'artifacts', appId, 'public', 'data', 'ratings')));
-                const data = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+                const data = snap.docs.map(d => {
+                    const r = d.data();
+                    return {
+                        id: d.id,
+                        registrationId: r.registrationId || r.studentId || '',
+                        studentName: r.studentName || '',
+                        email: r.email || '',
+                        hostel: r.hostel || '',
+                        messType: r.messType || '',
+                        mealType: r.mealType || '',
+                        rating: r.rating || '',
+                        comment: r.comment || '',
+                        date: r.date || '',
+                        createdAt: r.createdAt || ''
+                    };
+                });
                 setMaintenanceProgress({ phase: 'ratings', step: 'fetching', percent: 30, label: `Fetched ${data.length} ratings...` });
 
                 if (data.length === 0) {
@@ -1248,7 +1309,22 @@ export const AdminDashboard = ({ user, userData, onLogout, onSwitchToUser, confi
             } else if (type === 'proofs') {
                 setMaintenanceProgress({ phase: 'proofs', step: 'fetching', percent: 5, label: 'Fetching complaint proofs...' });
                 const snap = await getDocs(query(collection(db, 'artifacts', appId, 'public', 'data', 'proofs')));
-                const data = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+                const data = snap.docs.map(d => {
+                    const p = d.data();
+                    return {
+                        id: d.id,
+                        registrationId: p.registrationId || p.studentId || '',
+                        studentName: p.studentName || '',
+                        hostel: p.hostel || '',
+                        messType: p.messType || '',
+                        mealType: p.mealType || '',
+                        date: p.date || '',
+                        description: p.description || '',
+                        status: p.status || '',
+                        imageUrl: p.imageUrl || '',
+                        createdAt: p.createdAt || ''
+                    };
+                });
                 setMaintenanceProgress({ phase: 'proofs', step: 'fetching', percent: 30, label: `Fetched ${data.length} proofs...` });
 
                 if (data.length === 0) {
@@ -1263,6 +1339,7 @@ export const AdminDashboard = ({ user, userData, onLogout, onSwitchToUser, confi
                 const csvContent = XLSX.utils.sheet_to_csv(XLSX.utils.json_to_sheet(
                     data.map(p => ({
                         id: p.id,
+                        registrationId: p.registrationId || p.studentId || '',
                         studentName: p.studentName || '',
                         hostel: p.hostel || '',
                         messType: p.messType || '',
@@ -2089,6 +2166,116 @@ export const AdminDashboard = ({ user, userData, onLogout, onSwitchToUser, confi
                                 )}
                             </div>
                         )}
+                    </div>
+                );
+
+            case 'reports':
+                return (
+                    <div className="space-y-6 max-w-7xl">
+                        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-white dark:bg-[#16162A] p-5 rounded-3xl border border-zinc-200 dark:border-white/10 shadow-sm">
+                            <h3 className="text-xl font-heading font-bold text-[#0D0D0D] dark:text-white tracking-tight flex items-center gap-3">
+                                <Bug className="text-error" size={22} /> Bugs & Suggestions
+                            </h3>
+                            <div className="flex items-center gap-2 p-1 bg-zinc-100 dark:bg-black/30 rounded-2xl border border-zinc-200 dark:border-white/10">
+                                {['All', 'Pending', 'Resolved'].map(status => (
+                                    <button
+                                        key={status}
+                                        onClick={() => setReportStatusFilter(status)}
+                                        className={`px-4 py-2 rounded-xl text-xs font-black uppercase tracking-widest transition-all ${reportStatusFilter === status
+                                            ? 'bg-primary text-white'
+                                            : 'text-zinc-500 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-white'
+                                            }`}
+                                    >
+                                        {status}
+                                    </button>
+                                ))}
+                            </div>
+                        </div>
+
+                        <div className="grid gap-6 sm:grid-cols-2 lg:grid-cols-3">
+                            {reports.filter(r => {
+                                if (reportStatusFilter === 'All') return true;
+                                const status = (r.status || 'Pending').toLowerCase();
+                                return status === reportStatusFilter.toLowerCase();
+                            }).map(r => {
+                                const statusText = r.status || 'Pending';
+                                const isResolved = statusText.toLowerCase() === 'resolved';
+                                return (
+                                    <Card key={r.id} className="flex flex-col bg-white dark:bg-[#16162A] border border-zinc-200 dark:border-white/10 hover:border-primary/30 transition-all shadow-sm">
+                                        <div className="flex justify-between items-start mb-4">
+                                            <Badge variant={isResolved ? 'success' : 'warning'} className="font-black text-[9px] px-2 py-0.5">
+                                                {isResolved ? 'RESOLVED' : 'PENDING'}
+                                            </Badge>
+                                            <div className="text-[10px] font-black text-zinc-400 uppercase tracking-[0.2em]">
+                                                {r.createdAt?.toDate ? r.createdAt.toDate().toLocaleDateString() : 'Just now'}
+                                            </div>
+                                        </div>
+
+                                        <div className="mb-4">
+                                            <p className="font-heading font-black text-[#0D0D0D] dark:text-white text-base tracking-tight truncate">
+                                                {r.studentName || r.email || 'Unknown User'}
+                                            </p>
+                                            <div className="flex items-center gap-2 mt-1">
+                                                <p className="text-xs font-bold text-zinc-500 dark:text-zinc-400">{r.hostel || '-'}</p>
+                                                <span className="w-1 h-1 rounded-full bg-zinc-300 dark:bg-zinc-700" />
+                                                <p className="text-xs font-bold text-zinc-500 dark:text-zinc-400">{r.messType || '-'}</p>
+                                            </div>
+                                        </div>
+
+                                        <div className="bg-zinc-50 dark:bg-black/20 p-4 rounded-2xl border border-zinc-100 dark:border-white/5 mb-4 flex-1">
+                                            <p className="text-sm text-zinc-700 dark:text-zinc-300 leading-relaxed font-medium whitespace-pre-wrap">
+                                                {r.description}
+                                            </p>
+                                        </div>
+
+                                        {r.proofImage && (
+                                            <button
+                                                onClick={() => setSelectedImage(r.proofImage)}
+                                                className="mb-4 block w-full"
+                                            >
+                                                <img
+                                                    src={r.proofImage}
+                                                    alt="Report proof"
+                                                    className="w-full h-36 object-cover rounded-xl border border-zinc-200 dark:border-white/10"
+                                                />
+                                            </button>
+                                        )}
+
+                                        <div className="mt-auto space-y-2">
+                                            {!isResolved && (
+                                                <Button
+                                                    onClick={() => resolveReport(r.id)}
+                                                    variant="secondary"
+                                                    className="w-full py-2.5 bg-[#2E7D32]/5 border-[#2E7D32]/20 hover:bg-[#2E7D32]/10 text-[#2E7D32] shadow-none font-bold text-xs"
+                                                >
+                                                    <CheckCircle2 size={14} className="mr-2" /> Mark as Resolved
+                                                </Button>
+                                            )}
+                                            {isResolved && (
+                                                <Button
+                                                    onClick={() => deleteReport(r.id)}
+                                                    variant="secondary"
+                                                    className="w-full py-2.5 bg-error/5 border-error/20 hover:bg-error/10 text-error shadow-none font-bold text-xs"
+                                                >
+                                                    <Trash2 size={14} className="mr-2" /> Delete
+                                                </Button>
+                                            )}
+                                        </div>
+                                    </Card>
+                                );
+                            })}
+
+                            {reports.filter(r => {
+                                if (reportStatusFilter === 'All') return true;
+                                const status = (r.status || 'Pending').toLowerCase();
+                                return status === reportStatusFilter.toLowerCase();
+                            }).length === 0 && (
+                                    <div className="col-span-full text-center py-20 border-2 border-dashed border-zinc-200 dark:border-white/5 rounded-[40px] bg-white/50 dark:bg-transparent backdrop-blur-sm">
+                                        <Bug size={40} className="mx-auto text-zinc-300 mb-4 opacity-50" />
+                                        <p className="text-sm font-black text-zinc-400 uppercase tracking-[0.2em]">No reports found for this filter</p>
+                                    </div>
+                                )}
+                        </div>
                     </div>
                 );
 
@@ -3261,7 +3448,7 @@ export const AdminDashboard = ({ user, userData, onLogout, onSwitchToUser, confi
 
                 <nav className="flex-1 p-3 space-y-0.5 overflow-y-auto scrollbar-hide mt-2">
                     <p className="text-[9px] font-black uppercase tracking-widest text-[#A0A0A0] dark:text-[#8B8BAD] px-4 pt-2 pb-1">MENU</p>
-                    {navItems.slice(0, 4).map(item => (
+                    {navItems.slice(0, 5).map(item => (
                         <button
                             key={item.id}
                             onClick={() => { setActiveTab(item.id); setIsSidebarOpen(window.innerWidth >= 1024); }}
@@ -3283,7 +3470,7 @@ export const AdminDashboard = ({ user, userData, onLogout, onSwitchToUser, confi
                         </button>
                     ))}
                     <p className="text-[9px] font-black uppercase tracking-widest text-[#A0A0A0] dark:text-[#8B8BAD] px-4 pt-4 pb-1">GENERAL</p>
-                    {navItems.slice(4).map(item => (
+                    {navItems.slice(5).map(item => (
                         <button
                             key={item.id}
                             onClick={() => { setActiveTab(item.id); setIsSidebarOpen(window.innerWidth >= 1024); }}

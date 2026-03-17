@@ -285,6 +285,7 @@ export const UserDashboard = ({ user, userData, onLogout, onSwitchToAdmin, canSw
         try {
             await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'ratings'), {
                 studentId: user.uid,
+                registrationId: userData?.registrationId || '',
                 studentName: userData.name,
                 hostel: userData.hostel,
                 messType: userData.messType,
@@ -366,6 +367,7 @@ export const UserDashboard = ({ user, userData, onLogout, onSwitchToAdmin, canSw
         try {
             await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'proofs'), {
                 studentId: user.uid,
+                registrationId: userData?.registrationId || '',
                 studentName: userData.name,
                 hostel: userData.hostel?.trim().toUpperCase() || '',
                 messType: userData.messType?.trim().toUpperCase() || '',
@@ -447,14 +449,16 @@ Keep the health tip short, practical and encouraging.`;
         // Future dates are never allowed
         if (selectedDate > todayStr) return false;
 
-        // Previous day (before today) is always locked — ratings lock at midnight
+        // Previous days are locked
         if (selectedDate < todayStr) return false;
 
-        // Today: locked before the meal starts (open from meal start time onwards)
+        // Today: open from meal start time until 11:59:59 PM
         if (selectedDate === todayStr) {
             const now = new Date();
             const currentMinutes = now.getHours() * 60 + now.getMinutes();
             const startMinutes = getTimeMinutes(timing.start);
+            // Only lock before meal starts
+            // After meal starts, keep open until midnight
             return currentMinutes >= startMinutes;
         }
 
@@ -612,6 +616,25 @@ Keep the health tip short, practical and encouraging.`;
                     </motion.div>
                 )}
 
+                {userData && !userData.registrationId && (
+                    <div className="w-full bg-amber-500/10 border border-amber-500/30 rounded-2xl p-4 flex items-center justify-between gap-4 mb-4">
+                        <div className="flex items-center gap-3">
+                            <AlertTriangle size={18} className="text-amber-500 flex-shrink-0" />
+                            <p className="text-sm font-bold text-amber-700 dark:text-amber-400">
+                                Please add your{' '}
+                                {userData.role === 'faculty' ? 'Employee ID' : 'Registration Number'}{' '}
+                                to complete your profile.
+                            </p>
+                        </div>
+                        <button
+                            onClick={() => setShowProfileEdit(true)}
+                            className="text-xs font-black text-amber-600 dark:text-amber-400 uppercase tracking-widest bg-amber-500/20 px-3 py-1.5 rounded-xl hover:bg-amber-500/30 transition-colors flex-shrink-0"
+                        >
+                            Add Now
+                        </button>
+                    </div>
+                )}
+
                 {activeTab === 'menu' && (
                     <div className="space-y-8">
                         {isLoadingNotices ? (
@@ -721,6 +744,34 @@ Keep the health tip short, practical and encouraging.`;
                                             <div className={`px-5 py-4 flex items-center justify-between ${primaryBg}`}>
                                                 <h4 className="font-heading font-black text-white dark:text-[#0D0D0D] tracking-tight text-lg uppercase">{meal}</h4>
                                                 <div className="flex items-center gap-2">
+                                                    {/* Timing status badge */}
+                                                    {(() => {
+                                                        const timing = activeTimings[meal];
+                                                        if (!timing) return null;
+                                                        const todayStr = new Date().toLocaleDateString('en-CA');
+                                                        if (selectedDate !== todayStr) return null;
+                                                        const now = new Date();
+                                                        const currentMinutes = now.getHours() * 60 + now.getMinutes();
+                                                        const startMinutes = getTimeMinutes(timing.start);
+
+                                                        if (currentMinutes < startMinutes) {
+                                                            // Before meal starts
+                                                            return (
+                                                                <span className="bg-white/20 text-white text-[10px] font-black px-3 py-1.5 rounded-full uppercase tracking-wider">
+                                                                    OPENS {timing.start}
+                                                                </span>
+                                                            );
+                                                        } else if (currentMinutes >= startMinutes) {
+                                                            // During or after meal - show ONGOING, never CLOSED
+                                                            return (
+                                                                <span className="bg-white/30 text-white text-[10px] font-black px-3 py-1.5 rounded-full uppercase tracking-wider flex items-center gap-1">
+                                                                    <span className="w-1.5 h-1.5 rounded-full bg-white animate-pulse inline-block" />
+                                                                    ONGOING
+                                                                </span>
+                                                            );
+                                                        }
+                                                        return null;
+                                                    })()}
                                                     {mealSubmitted && (
                                                         <span className="bg-white/20 text-white dark:text-black text-[10px] font-black px-3 py-1.5 rounded-full uppercase">
                                                             SUBMITTED
