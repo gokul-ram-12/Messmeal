@@ -19,7 +19,7 @@ import { ProfileSetupScreen } from './ProfileSetup';
 import { BouncingLogoScreen } from './ui/LoadingScreen';
 import { UnifiedFeedbackModal } from './UnifiedFeedbackModal';
 import { SuccessModal } from './ui/SuccessModal';
-import { DEFAULT_HOSTELS, DEFAULT_MESS_TYPES, MEAL_ORDER, INITIAL_SUPER_ADMIN_EMAIL, SUPER_ADMIN_EMAILS, DEFAULT_TAGLINE, DEFAULT_MEAL_TIMINGS } from '../lib/constants';
+import { DEFAULT_HOSTELS, DEFAULT_MESS_TYPES, MEAL_ORDER, INITIAL_SUPER_ADMIN_EMAIL, SUPER_ADMIN_EMAILS, DEFAULT_TAGLINE, DEFAULT_MEAL_TIMINGS, ALLOWED_DOMAINS, WHITELISTED_EMAILS } from '../lib/constants';
 
 // Utility for CSV to Menu conversion
 const excelDateToJSDate = (serial) => {
@@ -494,11 +494,10 @@ export const AdminDashboard = ({ user, userData, onLogout, onSwitchToUser, confi
         try {
             const email = newAdminEmail.trim().toLowerCase();
 
-            if (!email.endsWith('@vitap.ac.in') &&
-                !email.endsWith('@vit.ac.in') &&
-                !email.endsWith('@vitapstudent.ac.in')) {
+            if (!ALLOWED_DOMAINS.some(domain => email.endsWith(domain)) &&
+                !WHITELISTED_EMAILS.includes(email)) {
                 throw new Error(
-                    'Only VIT-AP institutional emails can be made admin.'
+                    'Email domain not authorized for Admin access.'
                 );
             }
 
@@ -1239,6 +1238,64 @@ export const AdminDashboard = ({ user, userData, onLogout, onSwitchToUser, confi
 
     const maintenanceStatus = checkMaintenanceStatus();
 
+    const handleBackfillUsers = async () => {
+        setConfirmModal({
+            isOpen: true,
+            title: "Backfill All Users",
+            message: "This will scan all user accounts and ensure missing 'email' and 'role' fields are filled based on institutional domains and whitelist. Continue?",
+            isDestructive: false,
+            onConfirm: async () => {
+                setConfirmModal(prev => ({ ...prev, isOpen: false }));
+                const toastId = toast.loading("Backfilling user data...");
+                try {
+                    let count = 0;
+                    const batch = writeBatch(db);
+                    const snap = await getDocs(collection(db, 'artifacts', appId, 'users'));
+
+                    snap.docs.forEach(d => {
+                        const u = d.data();
+                        const email = u.email?.toLowerCase();
+                        if (!email) return;
+
+                        const updates = {};
+                        if (!u.email) updates.email = email;
+
+                        const isWhitelisted = WHITELISTED_EMAILS.includes(email);
+                        const isSuperAdmin = SUPER_ADMIN_EMAILS.map(e => e.toLowerCase()).includes(email);
+
+                        if (!u.role) {
+                            if (isSuperAdmin) updates.role = 'super_admin';
+                            else if (WHITELISTED_EMAILS.includes(email)) updates.role = 'admin';
+                            else if (ALLOWED_DOMAINS.some(domain => email.endsWith(domain))) {
+                                updates.role = email.endsWith('@vitapstudent.ac.in') ? 'student' : 'faculty';
+                            }
+                        }
+
+                        if (isWhitelisted || isSuperAdmin) {
+                            updates.approved = true;
+                            if (isWhitelisted) updates.adminApproved = true;
+                        }
+
+                        if (Object.keys(updates).length > 0) {
+                            batch.update(d.ref, { ...updates, updatedAt: serverTimestamp() });
+                            count++;
+                        }
+                    });
+
+                    if (count > 0) {
+                        await batch.commit();
+                        toast.success(`Successfully backfilled ${count} users.`, { id: toastId });
+                    } else {
+                        toast.success("No updates needed.", { id: toastId });
+                    }
+                } catch (err) {
+                    console.error("Backfill failed:", err);
+                    toast.error("Backfill failed: " + err.message, { id: toastId });
+                }
+            }
+        });
+    };
+
     const handleMaintenanceCleanup = async (type) => {
         try {
             const zip = new JSZip();
@@ -1372,7 +1429,7 @@ export const AdminDashboard = ({ user, userData, onLogout, onSwitchToUser, confi
 
                 const imageList = data
                     .filter(p => p.imageUrl)
-                    .map(p => `${p.studentName || p.studentId} | ${p.date} | ${p.mealType} | ${p.imageUrl}`)
+                    .map(p => `${p.studentName || 'Unknown'} | ${p.registrationId || 'N/A'} | ${p.date} | ${p.mealType} | ${p.imageUrl}`)
                     .join('\n');
                 if (imageList) zip.file(`Proof_Image_URLs_${sundayLabel}.txt`, imageList);
 
@@ -3075,7 +3132,7 @@ export const AdminDashboard = ({ user, userData, onLogout, onSwitchToUser, confi
                                     Use these tools to archive and clean up data. Download happens BEFORE delete — data is never lost.
                                 </p>
 
-                                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
                                     <div className="bg-amber-50 dark:bg-amber-500/10 border border-amber-200 dark:border-amber-500/40 rounded-2xl p-4 flex flex-col gap-2">
                                         <h4 className="text-xs font-black uppercase tracking-widest text-amber-600 dark:text-amber-300">All Maintenance</h4>
                                         <p className="text-[11px] text-zinc-700 dark:text-zinc-300">
@@ -3146,6 +3203,19 @@ export const AdminDashboard = ({ user, userData, onLogout, onSwitchToUser, confi
                                             className="mt-2 w-full bg-primary hover:bg-primary-dark text-white font-black py-2.5"
                                         >
                                             Proofs Maintenance
+                                        </Button>
+                                    </div>
+
+                                    <div className="bg-zinc-50 dark:bg-black/20 border border-zinc-200 dark:border-white/10 rounded-2xl p-4 flex flex-col gap-2">
+                                        <h4 className="text-xs font-black uppercase tracking-widest text-zinc-700 dark:text-zinc-300">User Backfill</h4>
+                                        <p className="text-[11px] text-zinc-600 dark:text-zinc-400">
+                                            Scans and fixes missing email/role fields for all registered users.
+                                        </p>
+                                        <Button
+                                            onClick={handleBackfillUsers}
+                                            className="mt-2 w-full bg-zinc-800 dark:bg-zinc-100 dark:text-zinc-900 text-white font-black py-2.5"
+                                        >
+                                            Run User Backfill
                                         </Button>
                                     </div>
                                 </div>

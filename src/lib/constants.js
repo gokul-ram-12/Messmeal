@@ -7,6 +7,7 @@ export const DEFAULT_TAGLINE = "Made with ❤️ , EAT ON TIME : BE ON TIME";
 export const DEFAULT_RATING_WINDOW = 48;
 
 export const ALLOWED_DOMAINS = ['@vitap.ac.in', '@vitapstudent.ac.in', '@vit.ac.in'];
+export const WHITELISTED_EMAILS = ['agpram03@gmail.com'];
 
 export const DEFAULT_MEAL_TIMINGS = {
     Breakfast: { start: "07:30", end: "09:00", icon: Coffee },

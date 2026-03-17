@@ -92,20 +92,15 @@ const App = () => {
 
   // Fetch Config
   useEffect(() => {
-    let unsub = null;
-    if (user) {
-      unsub = onSnapshot(doc(db, 'artifacts', appId, 'config', 'settings'), (doc) => {
-        if (doc.exists()) {
-          setConfig(doc.data());
-        }
-      });
-    } else {
-      setConfig(null); // Clear config on logout
-    }
-    return () => {
-      if (unsub) unsub();
-    };
-  }, [user]);
+    const unsub = onSnapshot(
+      doc(db, 'artifacts', appId, 'config', 'settings'),
+      (snap) => {
+        if (snap.exists()) setConfig(snap.data());
+      },
+      () => {}
+    );
+    return () => unsub();
+  }, []);
 
   const onUpdateConfig = async (updates) => {
     try {
@@ -198,8 +193,7 @@ const App = () => {
       }
     };
 
-    updateActivity();
-    const interval = setInterval(updateActivity, 2 * 60 * 1000); // Every 2 minutes
+    const interval = setInterval(updateActivity, 3 * 60 * 1000); // Every 3 minutes
 
     return () => clearInterval(interval);
   }, [user?.uid]);
@@ -221,8 +215,14 @@ const App = () => {
       const isFacultyDomain = email.endsWith('@vitap.ac.in') || email.endsWith('@vit.ac.in');
       const isSuperAdminEmail = superAdminEmails.includes(email) || email === superAdminEmail;
 
-      // RULE 4: Non-VIT email — hard block, no Firestore doc created
-      if (!isStudentDomain && !isFacultyDomain && !isSuperAdminEmail) {
+      const WHITELISTED_EMAILS = [
+          'agpram03@gmail.com'
+      ];
+      const isWhitelisted = WHITELISTED_EMAILS.includes(email);
+
+      // RULE 4: Access check
+      if (!isStudentDomain && !isFacultyDomain &&
+          !isSuperAdminEmail && !isWhitelisted) {
         await signOut(auth);
         setIsBlocked(true);
         setActionLoading(false);
@@ -239,34 +239,48 @@ const App = () => {
         let role = 'student';
         if (isSuperAdminEmail) role = 'super_admin';
         else if (isFacultyDomain) role = 'faculty';
+        else if (isWhitelisted) role = 'admin';
 
         await setDoc(userRef, {
           email,
           name: result.user.displayName || email.split('@')[0],
           role,
           approved: true,
+          adminApproved: isWhitelisted ? true : false,
           createdAt: new Date().toISOString()
         });
         toast.success('Account created! Welcome.');
 
-        // RULE 3: Super admin goes directly to admin view
-        if (role === 'super_admin') setViewMode('admin');
+        if (isWhitelisted) setViewMode('admin');
+        else if (role === 'super_admin') setViewMode('admin');
         else setViewMode('user');
       } else {
         const existingData = userSnap.data();
 
         if (!existingData.email) {
-          await updateDoc(userRef, { email });
+            await updateDoc(userRef, { email });
         }
 
         if (!existingData.role) {
-          const fixedRole = isStudentDomain ? 'student' :
-                            isFacultyDomain ? 'faculty' : 'student';
-          await updateDoc(userRef, {
-            role: fixedRole,
-            approved: true
-          });
+            const fixedRole = isStudentDomain ? 'student' :
+                              isFacultyDomain ? 'faculty' : 'student';
+            await updateDoc(userRef, {
+                role: fixedRole,
+                approved: true
+            });
         }
+
+        if (isWhitelisted &&
+            existingData.role !== 'admin' &&
+            existingData.role !== 'super_admin') {
+            await updateDoc(userRef, {
+                role: 'admin',
+                approved: true,
+                adminApproved: true
+            });
+        }
+
+        if (isWhitelisted) setViewMode('admin');
 
         // Force refresh super_admin role if email matches
         if (isSuperAdminEmail && (existingData.role !== 'super_admin' || !existingData.approved)) {
