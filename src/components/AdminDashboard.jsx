@@ -84,6 +84,7 @@ export const AdminDashboard = ({ user, userData, onLogout, onSwitchToUser, confi
     const [userFilter, setUserFilter] = useState('all'); // all, pending, students, faculty, admins
     const [feedbackSubTab, setFeedbackSubTab] = useState('ratings'); // ratings, suggestions
     const [reportStatusFilter, setReportStatusFilter] = useState('All');
+    const [reportFilter, setReportFilter] = useState('all');
     const [selectedImage, setSelectedImage] = useState(null);
 
     // Proof filters state
@@ -493,16 +494,17 @@ export const AdminDashboard = ({ user, userData, onLogout, onSwitchToUser, confi
         try {
             const email = newAdminEmail.trim().toLowerCase();
 
-            // BUG 2 FIX: Validate VIT domain before Firestore query
             if (!email.endsWith('@vitap.ac.in') &&
                 !email.endsWith('@vit.ac.in') &&
                 !email.endsWith('@vitapstudent.ac.in')) {
-                throw new Error('Only VIT-AP institutional emails can be made admin.');
+                throw new Error(
+                    'Only VIT-AP institutional emails can be made admin.'
+                );
             }
 
             // Try query by email field first
             let userDocRef = null;
-            let userData = null;
+            let foundUserData = null;
 
             const q = query(
                 collection(db, 'artifacts', appId, 'users'),
@@ -512,11 +514,13 @@ export const AdminDashboard = ({ user, userData, onLogout, onSwitchToUser, confi
             const snap = await getDocs(q);
 
             if (!snap.empty) {
-                userDocRef = doc(db, 'artifacts', appId, 'users', snap.docs[0].id);
-                userData = snap.docs[0].data();
+                userDocRef = doc(
+                    db, 'artifacts', appId, 'users', snap.docs[0].id
+                );
+                foundUserData = snap.docs[0].data();
             } else {
-                // Fallback: scan all users and match by email field
-                // (handles old users who may have email stored differently)
+                // Fallback: scan all users match by email
+                // handles old users with no email field
                 const allSnap = await getDocs(
                     collection(db, 'artifacts', appId, 'users')
                 );
@@ -524,16 +528,24 @@ export const AdminDashboard = ({ user, userData, onLogout, onSwitchToUser, confi
                     (d.data().email || '').toLowerCase() === email
                 );
                 if (match) {
-                    userDocRef = doc(db, 'artifacts', appId, 'users', match.id);
-                    userData = match.data();
+                    userDocRef = doc(
+                        db, 'artifacts', appId, 'users', match.id
+                    );
+                    foundUserData = match.data();
                 }
             }
 
             if (!userDocRef) {
-                throw new Error('User not found. They must sign in at least once before you can make them an Admin.');
+                throw new Error(
+                    'User not found. They must sign in at least once ' +
+                    'before you can make them an Admin.'
+                );
             }
 
-            if (userData.role === 'admin' || userData.role === 'super_admin') {
+            if (
+                foundUserData.role === 'admin' ||
+                foundUserData.role === 'super_admin'
+            ) {
                 throw new Error('User is already an Admin or Super Admin.');
             }
 
@@ -544,14 +556,16 @@ export const AdminDashboard = ({ user, userData, onLogout, onSwitchToUser, confi
                 email: email,
                 updatedAt: serverTimestamp()
             });
+
             await sendAdminNotificationEmail(email, 'Admin', 'ADD_ADMIN');
 
             setSuccessModal({
                 isOpen: true,
-                title: "Admin Added!",
-                message: `User "${email}" has been successfully granted admin privileges.`
+                title: 'Admin Added!',
+                message: `User "${email}" has been successfully granted
+                    admin privileges.`
             });
-            toast.success("Admin access granted.");
+            toast.success('Admin access granted.');
             setNewAdminEmail('');
         } catch (err) {
             toast.error(err.message);
@@ -1238,7 +1252,7 @@ export const AdminDashboard = ({ user, userData, onLogout, onSwitchToUser, confi
                     const r = d.data();
                     return {
                         id: d.id,
-                        registrationId: r.registrationId || r.studentId || '',
+                        registrationId: r.registrationId || '',
                         studentName: r.studentName || '',
                         email: r.email || '',
                         hostel: r.hostel || '',
@@ -1313,11 +1327,12 @@ export const AdminDashboard = ({ user, userData, onLogout, onSwitchToUser, confi
                     const p = d.data();
                     return {
                         id: d.id,
-                        registrationId: p.registrationId || p.studentId || '',
+                        registrationId: p.registrationId || '',
                         studentName: p.studentName || '',
+                        email: p.email || '',
                         hostel: p.hostel || '',
                         messType: p.messType || '',
-                        mealType: p.mealType || '',
+                        mealType: p.mealType || p.session || '',
                         date: p.date || '',
                         description: p.description || '',
                         status: p.status || '',
@@ -1339,8 +1354,9 @@ export const AdminDashboard = ({ user, userData, onLogout, onSwitchToUser, confi
                 const csvContent = XLSX.utils.sheet_to_csv(XLSX.utils.json_to_sheet(
                     data.map(p => ({
                         id: p.id,
-                        registrationId: p.registrationId || p.studentId || '',
+                        registrationId: p.registrationId || '',
                         studentName: p.studentName || '',
+                        email: p.email || '',
                         hostel: p.hostel || '',
                         messType: p.messType || '',
                         mealType: p.mealType || '',
@@ -2172,110 +2188,168 @@ export const AdminDashboard = ({ user, userData, onLogout, onSwitchToUser, confi
             case 'reports':
                 return (
                     <div className="space-y-6 max-w-7xl">
-                        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-white dark:bg-[#16162A] p-5 rounded-3xl border border-zinc-200 dark:border-white/10 shadow-sm">
-                            <h3 className="text-xl font-heading font-bold text-[#0D0D0D] dark:text-white tracking-tight flex items-center gap-3">
-                                <Bug className="text-error" size={22} /> Bugs & Suggestions
-                            </h3>
-                            <div className="flex items-center gap-2 p-1 bg-zinc-100 dark:bg-black/30 rounded-2xl border border-zinc-200 dark:border-white/10">
-                                {['All', 'Pending', 'Resolved'].map(status => (
-                                    <button
-                                        key={status}
-                                        onClick={() => setReportStatusFilter(status)}
-                                        className={`px-4 py-2 rounded-xl text-xs font-black uppercase tracking-widest transition-all ${reportStatusFilter === status
-                                            ? 'bg-primary text-white'
-                                            : 'text-zinc-500 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-white'
-                                            }`}
-                                    >
-                                        {status}
-                                    </button>
-                                ))}
-                            </div>
+                        <div className="flex flex-wrap gap-2 p-2 bg-white
+                            dark:bg-[#16162A] border border-zinc-200
+                            dark:border-white/10 rounded-2xl w-fit shadow-sm">
+                            {[
+                                { id: 'all', label: 'All' },
+                                { id: 'pending', label: 'Pending' },
+                                { id: 'resolved', label: 'Resolved' }
+                            ].map(f => (
+                                <button
+                                    key={f.id}
+                                    onClick={() => setReportFilter(f.id)}
+                                    className={`px-4 py-2 rounded-xl text-sm
+                                        font-bold transition-all duration-200
+                                        ${reportFilter === f.id
+                                            ? 'bg-[#2E7D32] dark:bg-[#7C3AED] text-white shadow-md'
+                                            : 'text-zinc-500 hover:text-[#2E7D32] hover:bg-zinc-100 dark:hover:bg-white/10'
+                                        }`}
+                                >
+                                    {f.label}
+                                </button>
+                            ))}
                         </div>
 
                         <div className="grid gap-6 sm:grid-cols-2 lg:grid-cols-3">
-                            {reports.filter(r => {
-                                if (reportStatusFilter === 'All') return true;
-                                const status = (r.status || 'Pending').toLowerCase();
-                                return status === reportStatusFilter.toLowerCase();
-                            }).map(r => {
-                                const statusText = r.status || 'Pending';
-                                const isResolved = statusText.toLowerCase() === 'resolved';
-                                return (
-                                    <Card key={r.id} className="flex flex-col bg-white dark:bg-[#16162A] border border-zinc-200 dark:border-white/10 hover:border-primary/30 transition-all shadow-sm">
-                                        <div className="flex justify-between items-start mb-4">
-                                            <Badge variant={isResolved ? 'success' : 'warning'} className="font-black text-[9px] px-2 py-0.5">
-                                                {isResolved ? 'RESOLVED' : 'PENDING'}
+                            {reports
+                                .filter(r => {
+                                    if (reportFilter === 'pending')
+                                        return !r.status ||
+                                            r.status.toLowerCase() === 'pending';
+                                    if (reportFilter === 'resolved')
+                                        return r.status?.toLowerCase() ===
+                                            'resolved';
+                                    return true;
+                                })
+                                .map(r => (
+                                    <Card key={r.id} className="flex flex-col
+                                        bg-white dark:bg-[#16162A] border
+                                        border-zinc-200 dark:border-white/10
+                                        shadow-sm">
+                                        <div className="flex justify-between
+                                            items-start mb-4">
+                                            <Badge
+                                                variant={r.status?.toLowerCase()
+                                                    === 'resolved'
+                                                    ? 'success' : 'warning'}
+                                                className="font-black text-[9px]"
+                                            >
+                                                {(r.status || 'PENDING')
+                                                    .toUpperCase()}
                                             </Badge>
-                                            <div className="text-[10px] font-black text-zinc-400 uppercase tracking-[0.2em]">
-                                                {r.createdAt?.toDate ? r.createdAt.toDate().toLocaleDateString() : 'Just now'}
-                                            </div>
+                                            <span className="text-[10px]
+                                                font-black text-zinc-400 uppercase
+                                                tracking-widest">
+                                                {r.createdAt?.toDate
+                                                    ? r.createdAt.toDate()
+                                                        .toLocaleDateString()
+                                                    : 'Just now'}
+                                            </span>
                                         </div>
 
-                                        <div className="mb-4">
-                                            <p className="font-heading font-black text-[#0D0D0D] dark:text-white text-base tracking-tight truncate">
-                                                {r.studentName || r.email || 'Unknown User'}
-                                            </p>
-                                            <div className="flex items-center gap-2 mt-1">
-                                                <p className="text-xs font-bold text-zinc-500 dark:text-zinc-400">{r.hostel || '-'}</p>
-                                                <span className="w-1 h-1 rounded-full bg-zinc-300 dark:bg-zinc-700" />
-                                                <p className="text-xs font-bold text-zinc-500 dark:text-zinc-400">{r.messType || '-'}</p>
-                                            </div>
+                                        <p className="text-sm font-bold
+                                            text-zinc-500 dark:text-zinc-400
+                                            truncate mb-1">
+                                            {r.email}
+                                        </p>
+                                        <div className="flex items-center gap-2
+                                            mb-3">
+                                            <p className="text-xs font-black
+                                                text-[#2E7D32] dark:text-[#A78BFA]
+                                                uppercase">{r.hostel}</p>
+                                            <span className="text-zinc-300">/</span>
+                                            <p className="text-xs font-black
+                                                text-[#2E7D32] dark:text-[#A78BFA]
+                                                uppercase">{r.messType}</p>
                                         </div>
 
-                                        <div className="bg-zinc-50 dark:bg-black/20 p-4 rounded-2xl border border-zinc-100 dark:border-white/5 mb-4 flex-1">
-                                            <p className="text-sm text-zinc-700 dark:text-zinc-300 leading-relaxed font-medium whitespace-pre-wrap">
+                                        <div className="bg-zinc-50 dark:bg-black/20
+                                            p-4 rounded-2xl border
+                                            border-zinc-100 dark:border-white/5
+                                            mb-4 flex-1">
+                                            <p className="text-sm text-zinc-700
+                                                dark:text-zinc-300 leading-relaxed
+                                                font-medium">
                                                 {r.description}
                                             </p>
                                         </div>
 
                                         {r.proofImage && (
                                             <button
-                                                onClick={() => setSelectedImage(r.proofImage)}
-                                                className="mb-4 block w-full"
+                                                onClick={() =>
+                                                    setSelectedImage(r.proofImage)}
+                                                className="mb-4 flex items-center
+                                                    gap-2 text-xs font-bold
+                                                    text-primary hover:underline"
                                             >
-                                                <img
-                                                    src={r.proofImage}
-                                                    alt="Report proof"
-                                                    className="w-full h-36 object-cover rounded-xl border border-zinc-200 dark:border-white/10"
-                                                />
+                                                <ImageIcon size={14} />
+                                                View Screenshot
                                             </button>
                                         )}
 
-                                        <div className="mt-auto space-y-2">
-                                            {!isResolved && (
+                                        <div className="mt-auto flex flex-col
+                                            gap-2">
+                                            {(!r.status ||
+                                                r.status.toLowerCase() ===
+                                                'pending') && (
                                                 <Button
-                                                    onClick={() => resolveReport(r.id)}
+                                                    onClick={() =>
+                                                        resolveReport(r.id)}
                                                     variant="secondary"
-                                                    className="w-full py-2.5 bg-[#2E7D32]/5 border-[#2E7D32]/20 hover:bg-[#2E7D32]/10 text-[#2E7D32] shadow-none font-bold text-xs"
+                                                    className="w-full py-2.5
+                                                        bg-[#2E7D32]/5
+                                                        border-[#2E7D32]/20
+                                                        hover:bg-[#2E7D32]/10
+                                                        text-[#2E7D32] shadow-none
+                                                        font-bold text-xs"
                                                 >
-                                                    <CheckCircle2 size={14} className="mr-2" /> Mark as Resolved
+                                                    <CheckCircle2 size={14}
+                                                        className="mr-2" />
+                                                    Mark as Resolved
                                                 </Button>
                                             )}
-                                            {isResolved && (
+                                            {r.status?.toLowerCase() ===
+                                                'resolved' && (
                                                 <Button
-                                                    onClick={() => deleteReport(r.id)}
+                                                    onClick={() =>
+                                                        deleteReport(r.id)}
                                                     variant="secondary"
-                                                    className="w-full py-2.5 bg-error/5 border-error/20 hover:bg-error/10 text-error shadow-none font-bold text-xs"
+                                                    className="w-full py-2.5
+                                                        bg-error/5 border-error/20
+                                                        hover:bg-error/10
+                                                        text-error shadow-none
+                                                        font-bold text-xs"
                                                 >
-                                                    <Trash2 size={14} className="mr-2" /> Delete
+                                                    <Trash2 size={14}
+                                                        className="mr-2" />
+                                                    Delete
                                                 </Button>
                                             )}
                                         </div>
                                     </Card>
-                                );
-                            })}
-
-                            {reports.filter(r => {
-                                if (reportStatusFilter === 'All') return true;
-                                const status = (r.status || 'Pending').toLowerCase();
-                                return status === reportStatusFilter.toLowerCase();
-                            }).length === 0 && (
-                                    <div className="col-span-full text-center py-20 border-2 border-dashed border-zinc-200 dark:border-white/5 rounded-[40px] bg-white/50 dark:bg-transparent backdrop-blur-sm">
-                                        <Bug size={40} className="mx-auto text-zinc-300 mb-4 opacity-50" />
-                                        <p className="text-sm font-black text-zinc-400 uppercase tracking-[0.2em]">No reports found for this filter</p>
-                                    </div>
-                                )}
+                                ))}
                         </div>
+
+                        {reports.filter(r => {
+                            if (reportFilter === 'pending')
+                                return !r.status ||
+                                    r.status.toLowerCase() === 'pending';
+                            if (reportFilter === 'resolved')
+                                return r.status?.toLowerCase() === 'resolved';
+                            return true;
+                        }).length === 0 && (
+                            <div className="text-center py-20 border-2
+                                border-dashed border-zinc-200 dark:border-white/5
+                                rounded-[40px]">
+                                <Bug size={40} className="mx-auto text-zinc-300
+                                    mb-4 opacity-50" />
+                                <p className="text-sm font-black text-zinc-400
+                                    uppercase tracking-[0.2em]">
+                                    No reports found
+                                </p>
+                            </div>
+                        )}
                     </div>
                 );
 
