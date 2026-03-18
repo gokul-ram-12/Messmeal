@@ -100,6 +100,14 @@ export const UserDashboard = ({ user, userData, onLogout, onSwitchToAdmin, canSw
 
     const [systemNotifPermission, setSystemNotifPermission] = useState(() => getNotifPermission());
 
+    const [submittingMeal, setSubmittingMeal] = useState(null);
+    const [submittingAll, setSubmittingAll] = useState(false);
+    const [ratingComments, setRatingComments] = useState({});
+    const [editRegId, setEditRegId] = useState(
+        userData?.registrationId || ''
+    );
+    const [regIdError, setRegIdError] = useState('');
+
     const isFaculty = userData?.role === 'faculty';
     const theme = isFaculty ? 'purple' : settings?.theme || 'blue';
 
@@ -312,6 +320,13 @@ export const UserDashboard = ({ user, userData, onLogout, onSwitchToAdmin, canSw
         }
     }, [user]);
 
+    // Sync registration ID when userData changes
+    useEffect(() => {
+        if (userData?.registrationId) {
+            setEditRegId(userData.registrationId);
+        }
+    }, [userData?.registrationId]);
+
     // ── Midnight ratings lock: lock previous day ratings at new day (00:00) ──
     useEffect(() => {
         const tick = () => {
@@ -326,21 +341,6 @@ export const UserDashboard = ({ user, userData, onLogout, onSwitchToAdmin, canSw
         const interval = setInterval(tick, 60000); // check every minute
         return () => clearInterval(interval);
     }, []);
-
-    const [submittingMeal, setSubmittingMeal] = useState(null);
-    const [submittingAll, setSubmittingAll] = useState(false);
-    const [ratingComments, setRatingComments] = useState({});
-
-    const [editRegId, setEditRegId] = useState(
-        userData?.registrationId || ''
-    );
-    const [regIdError, setRegIdError] = useState('');
-
-    useEffect(() => {
-        if (userData?.registrationId) {
-            setEditRegId(userData.registrationId);
-        }
-    }, [userData?.registrationId]);
 
     const saveRegId = async () => {
         const val = editRegId.trim().toUpperCase();
