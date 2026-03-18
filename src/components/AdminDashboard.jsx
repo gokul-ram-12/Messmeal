@@ -1695,6 +1695,37 @@ export const AdminDashboard = ({ user, userData, onLogout, onSwitchToUser, confi
         }
     };
 
+    const exportUsers = () => {
+        if (usersList.length === 0) {
+            toast.error('No users to export.');
+            return;
+        }
+        const data = usersList.map((u, i) => ({
+            'S.No': i + 1,
+            'Name': u.name || '',
+            'Email': u.email || '',
+            'Role': u.role || '',
+            'Registration ID': u.registrationId || '',
+            'Hostel': u.hostel || '',
+            'Mess Type': u.messType || '',
+            'Studying Year': u.studyingYear || '',
+            'Committee Role': u.committeeRole
+                ? COMMITTEE_ROLES[u.committeeRole] || ''
+                : '',
+            'Status': u.approved ? 'Active' : 'Inactive',
+            'Created At': u.createdAt
+                ? new Date(u.createdAt)
+                    .toLocaleDateString()
+                : '',
+            'Last Active': u.lastActive
+                ? new Date(u.lastActive)
+                    .toLocaleString()
+                : ''
+        }));
+        exportToExcel(data, `MessMeal_Users_${new Date().toLocaleDateString('en-CA')}`);
+        toast.success(`Exported ${data.length} users to Excel!`);
+    };
+
     const renderContent = () => {
         switch (activeTab) {
             case 'dashboard': {
@@ -3209,22 +3240,32 @@ export const AdminDashboard = ({ user, userData, onLogout, onSwitchToUser, confi
                             )}
                         </div>
 
-                        <div className="flex flex-wrap gap-2 mb-6 p-2 bg-white dark:bg-[#16162A] border border-zinc-200 dark:border-white/10 rounded-2xl w-fit shadow-sm">
-                            {[
-                                { id: 'all', label: 'All Users' },
-                                { id: 'revoked', label: 'Revoked' },
-                                { id: 'students', label: 'Students' },
-                                { id: 'faculty', label: 'Faculty' },
-                                { id: 'admins', label: 'Admins' }
-                            ].map(f => (
-                                <button
-                                    key={f.id}
-                                    onClick={() => setUserFilter(f.id)}
-                                    className={`px-4 py-2 rounded-xl text-sm font-bold transition-all duration-200 outline-none ${userFilter === f.id ? 'bg-[#2E7D32] dark:bg-[#7C3AED] text-white shadow-md' : 'text-zinc-500 dark:text-zinc-400 hover:text-[#2E7D32] dark:hover:text-white hover:bg-zinc-100 dark:hover:bg-white/10'}`}
-                                >
-                                    {f.label}
-                                </button>
-                            ))}
+                        <div className="flex flex-wrap items-center justify-between gap-4 mb-6">
+                            <div className="flex flex-wrap gap-2 p-2 bg-white dark:bg-[#16162A] border border-zinc-200 dark:border-white/10 rounded-2xl w-fit shadow-sm">
+                                {[
+                                    { id: 'all', label: 'All Users' },
+                                    { id: 'revoked', label: 'Revoked' },
+                                    { id: 'students', label: 'Students' },
+                                    { id: 'faculty', label: 'Faculty' },
+                                    { id: 'admins', label: 'Admins' }
+                                ].map(f => (
+                                    <button
+                                        key={f.id}
+                                        onClick={() => setUserFilter(f.id)}
+                                        className={`px-4 py-2 rounded-xl text-sm font-bold transition-all duration-200 outline-none ${userFilter === f.id ? 'bg-[#2E7D32] dark:bg-[#7C3AED] text-white shadow-md' : 'text-zinc-500 dark:text-zinc-400 hover:text-[#2E7D32] dark:hover:text-white hover:bg-zinc-100 dark:hover:bg-white/10'}`}
+                                    >
+                                        {f.label}
+                                    </button>
+                                ))}
+                            </div>
+                            <Button
+                                onClick={exportUsers}
+                                variant="secondary"
+                                className="bg-zinc-100 dark:bg-white/10 text-zinc-900 dark:text-white border-zinc-200 dark:border-white/20 hover:bg-zinc-200 dark:hover:bg-white/20 font-bold shadow-none text-xs"
+                            >
+                                <FileSpreadsheet size={14} className="mr-2" />
+                                Export Users
+                            </Button>
                         </div>
 
                         {isSuperAdmin && (

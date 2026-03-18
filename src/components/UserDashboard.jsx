@@ -348,6 +348,19 @@ export const UserDashboard = ({ user, userData, onLogout, onSwitchToAdmin, canSw
 
         setSubmittingAll(true);
         try {
+            const existingQuery = query(
+                collection(db, 'artifacts', appId, 'public', 'data', 'ratings'),
+                where('studentId', '==', user.uid),
+                where('date', '==', selectedDate),
+                where('mealType', '==', meal)
+            );
+            const existingSnap = await getDocs(existingQuery);
+            if (!existingSnap.empty) {
+                toast.error(`You have already rated ${meal} for today.`);
+                setSubmittingAll(false);
+                return;
+            }
+
             await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'ratings'), {
                 studentId: user.uid,
                 registrationId: userData?.registrationId || '',
