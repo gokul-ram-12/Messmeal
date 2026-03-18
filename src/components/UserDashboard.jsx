@@ -23,6 +23,37 @@ import { UnifiedFeedbackModal } from './UnifiedFeedbackModal';
 import { CommitteeChecklist } from './CommitteeChecklist';
 import { ClipboardList } from 'lucide-react';
 
+const MENU_CACHE_TTL = 30 * 60 * 1000; // 30 minutes
+
+const getMenuFromCache = (cacheKey) => {
+    try {
+        const cached = localStorage.getItem(
+            `menu_cache_${cacheKey}`
+        );
+        if (!cached) return null;
+        const { data, timestamp } = JSON.parse(cached);
+        if (Date.now() - timestamp > MENU_CACHE_TTL)
+            return null;
+        return data;
+    } catch {
+        return null;
+    }
+};
+
+const setMenuToCache = (cacheKey, data) => {
+    try {
+        localStorage.setItem(
+            `menu_cache_${cacheKey}`,
+            JSON.stringify({
+                data,
+                timestamp: Date.now()
+            })
+        );
+    } catch {
+        // localStorage full — ignore
+    }
+};
+
 export const UserDashboard = ({ user, userData, onLogout, onSwitchToAdmin, canSwitchToAdmin, config, settings, updateSettings, isPending = false }) => {
     const [activeTab, setActiveTab] = useState('menu');
     const [viewType, setViewType] = useState('daily'); // 'daily' or 'limits'
@@ -142,8 +173,18 @@ export const UserDashboard = ({ user, userData, onLogout, onSwitchToAdmin, canSw
             setIsLoadingMenu(false);
         };
 
+        const cacheKey = `${userData.hostel}_${userData.messType}_${year}_${month}`;
+        const cached = getMenuFromCache(cacheKey);
+        if (cached) {
+            menuData = cached;
+            syncMenu();
+        }
+
         const unsubMenu = onSnapshot(docRef, (snap) => {
             menuData = snap.exists() ? snap.data() : null;
+            if (menuData) {
+                setMenuToCache(cacheKey, menuData);
+            }
             syncMenu();
         });
 

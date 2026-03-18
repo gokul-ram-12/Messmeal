@@ -89,6 +89,14 @@ export const AdminDashboard = ({ user, userData, onLogout, onSwitchToUser, confi
     const [reportFilter, setReportFilter] = useState('all');
     const [selectedImage, setSelectedImage] = useState(null);
 
+    // Pagination states
+    const [usersPage, setUsersPage] = useState(1);
+    const USERS_PER_PAGE = 30;
+
+    useEffect(() => {
+        setUsersPage(1);
+    }, [userFilter, searchQuery]);
+
     // Proof filters state
     const [proofDateFilter, setProofDateFilter] = useState('');
     const [proofMessTypeFilter, setProofMessTypeFilter] = useState('ALL');
@@ -1356,6 +1364,14 @@ export const AdminDashboard = ({ user, userData, onLogout, onSwitchToUser, confi
         if (userFilter === 'admins') return u.role === 'admin' || u.role === 'super_admin';
         return true;
     });
+
+    const totalUserPages = Math.ceil(
+        filteredUsers.length / USERS_PER_PAGE
+    );
+    const paginatedUsers = filteredUsers.slice(
+        (usersPage - 1) * USERS_PER_PAGE,
+        usersPage * USERS_PER_PAGE
+    );
 
     const navItems = [
         { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
@@ -3305,7 +3321,7 @@ export const AdminDashboard = ({ user, userData, onLogout, onSwitchToUser, confi
                                         </tr>
                                     </thead>
                                     <tbody className="divide-y divide-white/5">
-                                        {filteredUsers.map(u => (
+                                        {paginatedUsers.map(u => (
                                             <tr key={u.id} className="hover:bg-zinc-50 dark:hover:bg-white/5 transition-colors bg-transparent group border-b border-zinc-100 dark:border-white/5">
                                                 <td className="p-5">
                                                     <div className="font-heading font-bold text-[#0D0D0D] dark:text-white text-base">{u.name || 'N/A'}</div>
@@ -3377,6 +3393,89 @@ export const AdminDashboard = ({ user, userData, onLogout, onSwitchToUser, confi
                                         ))}
                                     </tbody>
                                 </table>
+                                {totalUserPages > 1 && (
+                                    <div className="flex items-center justify-between
+                                        px-5 py-4 border-t border-zinc-100
+                                        dark:border-white/5">
+                                        <p className="text-xs font-bold text-zinc-400">
+                                            Showing {(usersPage - 1) * USERS_PER_PAGE + 1}
+                                            {' – '}
+                                            {Math.min(
+                                                usersPage * USERS_PER_PAGE,
+                                                filteredUsers.length
+                                            )}{' '}
+                                            of {filteredUsers.length} users
+                                        </p>
+                                        <div className="flex items-center gap-2">
+                                            <button
+                                                onClick={() => setUsersPage(p =>
+                                                    Math.max(1, p - 1))}
+                                                disabled={usersPage === 1}
+                                                className="px-4 py-2 rounded-xl text-sm
+                                                    font-bold bg-zinc-100 dark:bg-white/10
+                                                    text-zinc-700 dark:text-white
+                                                    disabled:opacity-40
+                                                    hover:bg-zinc-200
+                                                    dark:hover:bg-white/20
+                                                    transition-colors"
+                                            >
+                                                ← Prev
+                                            </button>
+                                            {Array.from({ length: totalUserPages },
+                                                (_, i) => i + 1)
+                                                .filter(p =>
+                                                    p === 1 ||
+                                                    p === totalUserPages ||
+                                                    Math.abs(p - usersPage) <= 1
+                                                )
+                                                .reduce((acc, p, idx, arr) => {
+                                                    if (idx > 0 &&
+                                                        p - arr[idx - 1] > 1) {
+                                                        acc.push('...');
+                                                    }
+                                                    acc.push(p);
+                                                    return acc;
+                                                }, [])
+                                                .map((p, i) => (
+                                                    p === '...' ? (
+                                                        <span key={`dots-${i}`}
+                                                            className="text-zinc-400
+                                                            text-sm font-bold px-2">
+                                                            ...
+                                                        </span>
+                                                    ) : (
+                                                        <button
+                                                            key={p}
+                                                            onClick={() => setUsersPage(p)}
+                                                            className={`w-9 h-9 rounded-xl
+                                                                text-sm font-bold transition-all
+                                                                ${usersPage === p
+                                                                    ? 'bg-primary text-white shadow-md'
+                                                                    : 'bg-zinc-100 dark:bg-white/10 text-zinc-700 dark:text-white hover:bg-zinc-200 dark:hover:bg-white/20'
+                                                                }`}
+                                                        >
+                                                            {p}
+                                                        </button>
+                                                    )
+                                                ))
+                                            }
+                                            <button
+                                                onClick={() => setUsersPage(p =>
+                                                    Math.min(totalUserPages, p + 1))}
+                                                disabled={usersPage === totalUserPages}
+                                                className="px-4 py-2 rounded-xl text-sm
+                                                    font-bold bg-zinc-100 dark:bg-white/10
+                                                    text-zinc-700 dark:text-white
+                                                    disabled:opacity-40
+                                                    hover:bg-zinc-200
+                                                    dark:hover:bg-white/20
+                                                    transition-colors"
+                                            >
+                                                Next →
+                                            </button>
+                                        </div>
+                                    </div>
+                                )}
                                 {filteredUsers.length === 0 && (
                                     <div className="text-center py-16">
                                         <Users size={48} className="mx-auto text-zinc-600 mb-4 opacity-50" />
