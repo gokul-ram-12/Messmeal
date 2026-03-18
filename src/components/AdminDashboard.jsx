@@ -3,7 +3,7 @@ import { motion } from 'framer-motion';
 import { collection, query, onSnapshot, doc, getDoc, updateDoc, setDoc, deleteDoc, serverTimestamp, writeBatch, getDocs, where, orderBy, limit, addDoc } from 'firebase/firestore';
 import { db, appId } from '../lib/firebase';
 import { sendAdminNotificationEmail } from '../lib/mailer';
-import { LayoutDashboard, Users, Utensils, Megaphone, FileSpreadsheet, Settings, LogOut, Search, Check, X, Bell, Crown, Save, Calendar, BarChart3, ChevronRight, Menu as MenuIcon, AlertTriangle, Star, ImageIcon, Eye, Download, Shield, User, Clock4, PlusCircle, Trash2, RefreshCw, Globe, MessageSquare, CheckCircle2, Sparkles, ShieldAlert, ShieldCheck, FileText, Menu, Bug, ClipboardList, XCircle } from 'lucide-react';
+import { LayoutDashboard, Users, Utensils, Megaphone, FileSpreadsheet, Settings, LogOut, Search, Check, X, Bell, Crown, Save, Calendar, BarChart3, ChevronRight, Menu as MenuIcon, AlertTriangle, Star, ImageIcon, Eye, Download, Shield, User, Clock4, PlusCircle, Trash2, RefreshCw, Globe, MessageSquare, CheckCircle2, Sparkles, ShieldAlert, ShieldCheck, FileText, Menu, Bug, ClipboardList, XCircle, Trophy } from 'lucide-react';
 import * as XLSX from 'xlsx';
 import JSZip from 'jszip';
 import { toast } from 'react-hot-toast';
@@ -53,6 +53,10 @@ export const AdminDashboard = ({ user, userData, onLogout, onSwitchToUser, confi
     const [isFeedbackOpen, setIsFeedbackOpen] = useState(false);
     const [currentTime, setCurrentTime] = useState(new Date());
     const [submitting, setSubmitting] = useState(false);
+    const [closureStartDate, setClosureStartDate] = useState(new Date().toLocaleDateString('en-CA'));
+    const [closureEndDate, setClosureEndDate] = useState('');
+    const [closureReason, setClosureReason] = useState('Holiday / Special Event');
+    const [schedulingClosure, setSchedulingClosure] = useState(false);
 
     // Data states
     const [usersList, setUsersList] = useState([]);
@@ -80,6 +84,37 @@ export const AdminDashboard = ({ user, userData, onLogout, onSwitchToUser, confi
             avgs[m] = list.length > 0 ? (list.reduce((a, b) => a + b, 0) / list.length).toFixed(1) : 'N/A';
         });
         return avgs;
+    }, [feedbacks]);
+
+    const leaderboardData = useMemo(() => {
+        const groups = {};
+        feedbacks.forEach(f => {
+            if (!f.hostel || !f.messType || !f.rating)
+                return;
+            const key = `${f.hostel}_${f.messType}`;
+            if (!groups[key]) {
+                groups[key] = {
+                    hostel: f.hostel,
+                    messType: f.messType,
+                    ratings: [],
+                    totalRatings: 0
+                };
+            }
+            groups[key].ratings.push(Number(f.rating));
+            groups[key].totalRatings++;
+        });
+        return Object.values(groups)
+            .map(g => ({
+                ...g,
+                average: g.ratings.length > 0
+                    ? (g.ratings.reduce(
+                        (a, b) => a + b, 0
+                    ) / g.ratings.length).toFixed(2)
+                    : '0.00'
+            }))
+            .sort((a, b) =>
+                Number(b.average) - Number(a.average)
+            );
     }, [feedbacks]);
 
     // UI states
@@ -1196,6 +1231,71 @@ export const AdminDashboard = ({ user, userData, onLogout, onSwitchToUser, confi
         }
     };
 
+    const scheduleAdvanceClosure = async () => {
+        if (!closureStartDate) return;
+        setSchedulingClosure(true);
+        try {
+            const start = new Date(
+                closureStartDate + 'T00:00:00'
+            );
+            const end = closureEndDate
+                ? new Date(closureEndDate + 'T00:00:00')
+                : start;
+            const targetHostels =
+                getTargetHostels(menuHostel);
+            const targetMessTypes =
+                getTargetMessTypes(menuType);
+            const dates = [];
+            const current = new Date(start);
+            while (current <= end) {
+                dates.push(
+                    current.toLocaleDateString('en-CA')
+                );
+                current.setDate(current.getDate() + 1);
+            }
+            const batch = writeBatch(db);
+            dates.forEach(date => {
+                targetHostels.forEach(h => {
+                    targetMessTypes.forEach(m => {
+                        const ref = doc(db,
+                            'artifacts', appId,
+                            'public', 'data',
+                            'mess_closures',
+                            `${h}_${m}_${date}`);
+                        batch.set(ref, {
+                            date, hostel: h,
+                            messType: m,
+                            isClosed: true,
+                            reason: closureReason ||
+                                'Holiday / Special Event',
+                            scheduledAt: serverTimestamp(),
+                            scheduledBy:
+                                userData?.name ||
+                                user?.email
+                        }, { merge: true });
+                    });
+                });
+            });
+            await batch.commit();
+            setSuccessModal({
+                isOpen: true,
+                title: 'Closure Scheduled! ✓',
+                message: `Mess closure scheduled for
+                    ${dates.length} day(s) across
+                    ${targetHostels.length} hostel(s).`
+            });
+            toast.success(
+                `Closure scheduled for
+                ${dates.length} day(s)!`
+            );
+            setClosureEndDate('');
+            setClosureReason('Holiday / Special Event');
+        } catch (err) {
+            toast.error('Failed to schedule closure.');
+        }
+        setSchedulingClosure(false);
+    };
+
 
     const processCSV = async () => {
         if (!csvFile) return;
@@ -1352,6 +1452,7 @@ export const AdminDashboard = ({ user, userData, onLogout, onSwitchToUser, confi
 
     const navItems = [
         { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
+        { id: 'leaderboard', label: 'Leaderboard', icon: Trophy },
         { id: 'menus', label: 'Menu Management', icon: Calendar },
         { id: 'notices', label: 'Notices', icon: Megaphone },
         { id: 'feedback', label: 'Feedback', icon: Star },
@@ -2100,6 +2201,88 @@ export const AdminDashboard = ({ user, userData, onLogout, onSwitchToUser, confi
                 );
             }
 
+            case 'leaderboard':
+                return (
+                    <div className="space-y-6 max-w-4xl">
+                        <div className="flex items-center justify-between flex-wrap gap-4">
+                            <div>
+                                <h2 className="text-2xl font-heading font-black text-dark dark:text-white tracking-tight flex items-center gap-3">
+                                    <Trophy size={28} className="text-amber-500" />
+                                    Mess Rating Leaderboard
+                                </h2>
+                                <p className="text-xs font-bold text-zinc-400 uppercase tracking-widest mt-1">
+                                    All time average ratings per hostel and mess type
+                                </p>
+                            </div>
+                            <div className="bg-amber-50 dark:bg-amber-900/20 px-4 py-2 rounded-2xl border border-amber-200 dark:border-amber-500/30">
+                                <p className="text-xs font-black text-amber-600 dark:text-amber-400 uppercase tracking-widest">
+                                    Based on {feedbacks.length} total ratings
+                                </p>
+                            </div>
+                        </div>
+
+                        {leaderboardData.length === 0 ? (
+                            <div className="text-center py-20 border-2 border-dashed border-zinc-200 dark:border-white/5 rounded-[40px]">
+                                <Trophy size={40} className="mx-auto text-zinc-300 mb-4 opacity-50" />
+                                <p className="text-sm font-black text-zinc-400 uppercase tracking-[0.2em]">
+                                    No ratings data yet
+                                </p>
+                            </div>
+                        ) : (
+                            <div className="space-y-3">
+                                {leaderboardData.map((item, index) => {
+                                    const medal = index === 0 ? '🥇' : index === 1 ? '🥈' : index === 2 ? '🥉' : `#${index + 1}`;
+                                    const avgNum = Number(item.average);
+                                    const barWidth = Math.min(100, (avgNum / 5) * 100);
+                                    const barColor = avgNum >= 4 ? 'bg-emerald-500' : avgNum >= 3 ? 'bg-amber-500' : 'bg-red-500';
+                                    return (
+                                        <div key={`${item.hostel}_${item.messType}`}
+                                            className={`p-5 rounded-2xl border flex items-center gap-4 transition-all hover:shadow-md ${index === 0
+                                                ? 'bg-amber-50 dark:bg-amber-900/20 border-amber-200 dark:border-amber-500/30'
+                                                : index === 1
+                                                    ? 'bg-zinc-50 dark:bg-white/5 border-zinc-200 dark:border-white/10'
+                                                    : index === 2
+                                                        ? 'bg-orange-50 dark:bg-orange-900/10 border-orange-200 dark:border-orange-500/20'
+                                                        : 'bg-white dark:bg-[#16162A] border-zinc-200 dark:border-white/10'
+                                                }`}>
+                                            <div className="text-2xl w-10 text-center flex-shrink-0">
+                                                {medal}
+                                            </div>
+                                            <div className="flex-1 min-w-0">
+                                                <div className="flex items-center gap-2 mb-2 flex-wrap">
+                                                    <p className="font-heading font-black text-dark dark:text-white tracking-tight">
+                                                        {item.hostel}
+                                                    </p>
+                                                    <span className="text-[10px] font-black px-2 py-0.5 rounded-full bg-primary/10 text-primary uppercase tracking-widest">
+                                                        {item.messType}
+                                                    </span>
+                                                </div>
+                                                <div className="w-full h-2 bg-zinc-200 dark:bg-white/10 rounded-full overflow-hidden">
+                                                    <div
+                                                        className={`h-full rounded-full transition-all duration-500 ${barColor}`}
+                                                        style={{ width: `${barWidth}%` }}
+                                                    />
+                                                </div>
+                                                <p className="text-[10px] font-bold text-zinc-400 mt-1">
+                                                    {item.totalRatings} rating{item.totalRatings !== 1 ? 's' : ''}
+                                                </p>
+                                            </div>
+                                            <div className="text-right flex-shrink-0">
+                                                <p className={`text-3xl font-heading font-black ${avgNum >= 4 ? 'text-emerald-500' : avgNum >= 3 ? 'text-amber-500' : 'text-red-500'}`}>
+                                                    {item.average}
+                                                </p>
+                                                <p className="text-[10px] font-bold text-zinc-400">
+                                                    / 5.00
+                                                </p>
+                                            </div>
+                                        </div>
+                                    );
+                                })}
+                            </div>
+                        )}
+                    </div>
+                );
+
             case 'menus':
                 return (
                     <div className="space-y-8 max-w-4xl">
@@ -2264,6 +2447,62 @@ export const AdminDashboard = ({ user, userData, onLogout, onSwitchToUser, confi
 
 
                         </Card >
+
+                        {/* Advance Mess Closure Scheduling */}
+                        <Card className="bg-amber-50 dark:bg-amber-900/10 border border-amber-200 dark:border-amber-500/20 mt-4">
+                            <h3 className="font-heading font-bold text-lg text-amber-700 dark:text-amber-400 mb-4 flex items-center gap-2">
+                                <Calendar size={20} />
+                                Schedule Advance Closure
+                            </h3>
+                            <p className="text-xs text-amber-600 dark:text-amber-400/80 font-medium mb-4">
+                                Schedule mess closure for any future dates. Students will see a red Mess Closed banner.
+                            </p>
+                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-4">
+                                <div>
+                                    <label className="block text-[10px] font-black text-zinc-500 uppercase tracking-widest mb-2">
+                                        Start Date
+                                    </label>
+                                    <input
+                                        type="date"
+                                        value={closureStartDate}
+                                        onChange={(e) => setClosureStartDate(e.target.value)}
+                                        min={new Date().toLocaleDateString('en-CA')}
+                                        className="w-full p-3 bg-white dark:bg-black/40 border border-zinc-200 dark:border-white/10 rounded-xl outline-none focus:border-amber-500 text-dark dark:text-white"
+                                    />
+                                </div>
+                                <div>
+                                    <label className="block text-[10px] font-black text-zinc-500 uppercase tracking-widest mb-2">
+                                        End Date (optional)
+                                    </label>
+                                    <input
+                                        type="date"
+                                        value={closureEndDate}
+                                        onChange={(e) => setClosureEndDate(e.target.value)}
+                                        min={closureStartDate}
+                                        className="w-full p-3 bg-white dark:bg-black/40 border border-zinc-200 dark:border-white/10 rounded-xl outline-none focus:border-amber-500 text-dark dark:text-white"
+                                    />
+                                </div>
+                            </div>
+                            <div className="mb-4">
+                                <label className="block text-[10px] font-black text-zinc-500 uppercase tracking-widest mb-2">
+                                    Reason
+                                </label>
+                                <input
+                                    type="text"
+                                    value={closureReason}
+                                    onChange={(e) => setClosureReason(e.target.value)}
+                                    placeholder="Holiday / Special Event"
+                                    className="w-full p-3 bg-white dark:bg-black/40 border border-zinc-200 dark:border-white/10 rounded-xl outline-none focus:border-amber-500 text-dark dark:text-white"
+                                />
+                            </div>
+                            <Button
+                                onClick={scheduleAdvanceClosure}
+                                loading={schedulingClosure}
+                                className="w-full py-3 bg-amber-500 hover:bg-amber-600 text-white font-black uppercase tracking-widest"
+                            >
+                                Schedule Closure
+                            </Button>
+                        </Card>
                     </div >
                 );
 

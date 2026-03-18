@@ -54,6 +54,42 @@ const setMenuToCache = (cacheKey, data) => {
     }
 };
 
+const TOUR_SLIDES = [
+    {
+        emoji: '👋',
+        title: 'Welcome to MessMeal!',
+        description: 'Your campus dining companion. ' +
+            'View daily menus, rate your meals, ' +
+            'and report food issues — all in one place.',
+        color: 'from-blue-600 to-indigo-600'
+    },
+    {
+        emoji: '🍽️',
+        title: 'View Daily Menu',
+        description: 'Tap the MENU tab to see ' +
+            'today\'s breakfast, lunch, snacks ' +
+            'and dinner. Switch between Day View ' +
+            'and Week View.',
+        color: 'from-emerald-600 to-teal-600'
+    },
+    {
+        emoji: '⭐',
+        title: 'Rate Your Meals',
+        description: 'Tap the RATE tab after eating ' +
+            'to give stars and feedback. ' +
+            'Your ratings help improve food quality.',
+        color: 'from-amber-500 to-orange-500'
+    },
+    {
+        emoji: '📸',
+        title: 'Report Food Issues',
+        description: 'Tap the PROOF tab to report ' +
+            'food quality issues with photos. ' +
+            'Admins review every complaint.',
+        color: 'from-red-500 to-pink-500'
+    }
+];
+
 export const UserDashboard = ({ user, userData, onLogout, onSwitchToAdmin, canSwitchToAdmin, config, settings, updateSettings, isPending = false }) => {
     const [activeTab, setActiveTab] = useState('menu');
     const [viewType, setViewType] = useState('daily'); // 'daily' or 'limits'
@@ -107,6 +143,8 @@ export const UserDashboard = ({ user, userData, onLogout, onSwitchToAdmin, canSw
         userData?.registrationId || ''
     );
     const [regIdError, setRegIdError] = useState('');
+    const [showTour, setShowTour] = useState(false);
+    const [tourStep, setTourStep] = useState(0);
 
     const isFaculty = userData?.role === 'faculty';
     const theme = isFaculty ? 'purple' : settings?.theme || 'blue';
@@ -130,6 +168,21 @@ export const UserDashboard = ({ user, userData, onLogout, onSwitchToAdmin, canSw
 
         return result;
     }, [config, selectedDate]);
+
+    useEffect(() => {
+        if (!user?.uid) return;
+        const key = `messmeal_tour_${user.uid}`;
+        const seen = localStorage.getItem(key);
+        if (!seen) setShowTour(true);
+    }, [user?.uid]);
+
+    const dismissTour = () => {
+        localStorage.setItem(
+            `messmeal_tour_${user.uid}`, '1'
+        );
+        setShowTour(false);
+        setTourStep(0);
+    };
 
     useEffect(() => {
         const h = (userData?.hostel || '').trim().toUpperCase();
@@ -1603,6 +1656,56 @@ Keep the health tip short, practical and encouraging.`;
                 title={successModal.title}
                 message={successModal.message}
             />
+
+            {showTour && (
+                <div className="fixed inset-0 z-[300] bg-black/80 backdrop-blur-sm flex items-end justify-center p-4">
+                    <div className="w-full max-w-md bg-white dark:bg-[#1A1A2E] rounded-[2rem] overflow-hidden shadow-2xl">
+                        <div className={`bg-gradient-to-br ${TOUR_SLIDES[tourStep].color} p-8 text-center`}>
+                            <div className="text-6xl mb-4">
+                                {TOUR_SLIDES[tourStep].emoji}
+                            </div>
+                            <h2 className="text-2xl font-heading font-black text-white tracking-tight">
+                                {TOUR_SLIDES[tourStep].title}
+                            </h2>
+                        </div>
+                        <div className="p-6">
+                            <p className="text-zinc-600 dark:text-zinc-300 text-base font-medium leading-relaxed text-center mb-6">
+                                {TOUR_SLIDES[tourStep].description}
+                            </p>
+                            <div className="flex justify-center gap-2 mb-6">
+                                {TOUR_SLIDES.map((_, i) => (
+                                    <div key={i}
+                                        className={`h-2 rounded-full transition-all duration-300 ${i === tourStep
+                                            ? 'w-6 bg-primary'
+                                            : 'w-2 bg-zinc-300 dark:bg-zinc-600'
+                                        }`}
+                                    />
+                                ))}
+                            </div>
+                            <div className="flex gap-3">
+                                <button
+                                    onClick={dismissTour}
+                                    className="flex-1 py-3 rounded-2xl text-sm font-bold text-zinc-500 bg-zinc-100 dark:bg-white/10 hover:bg-zinc-200 dark:hover:bg-white/20 transition-colors"
+                                >
+                                    Skip
+                                </button>
+                                <button
+                                    onClick={() => {
+                                        if (tourStep < TOUR_SLIDES.length - 1) {
+                                            setTourStep(s => s + 1);
+                                        } else {
+                                            dismissTour();
+                                        }
+                                    }}
+                                    className="flex-[2] py-3 rounded-2xl text-sm font-black text-white bg-primary hover:bg-primary/90 transition-colors"
+                                >
+                                    {tourStep < TOUR_SLIDES.length - 1 ? 'Next →' : 'Get Started! 🎉'}
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            )}
         </div >
     );
 };
