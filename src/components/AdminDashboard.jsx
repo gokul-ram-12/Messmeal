@@ -1428,22 +1428,17 @@ export const AdminDashboard = ({ user, userData, onLogout, onSwitchToUser, confi
             ratingsNeeded = true;
         }
 
-        // PROOFS — due every Sunday only
-        let proofsNeeded = false;
-        const lastProofsReset = maintenance.lastProofsReset
-            ? new Date(maintenance.lastProofsReset)
+        // CHECKLISTS — due on 1st of every month
+        let checklistsNeeded = false;
+        const lastChecklistReset = maintenance.lastChecklistReset
+            ? new Date(maintenance.lastChecklistReset)
             : null;
-        const dayOfWeek = now.getDay(); // 0 = Sunday
-        const lastSunday = new Date(now);
-        lastSunday.setDate(now.getDate() - dayOfWeek);
-        lastSunday.setHours(0, 0, 0, 0);
-        if (dayOfWeek === 0) { // Today is Sunday
-            if (!lastProofsReset || lastProofsReset < lastSunday) {
-                proofsNeeded = true;
-            }
+        const startOfThisMonthChecklist = new Date(year, month, 1);
+        if (!lastChecklistReset || lastChecklistReset < startOfThisMonthChecklist) {
+            checklistsNeeded = true;
         }
 
-        return { ratingsNeeded, proofsNeeded };
+        return { ratingsNeeded, proofsNeeded, checklistsNeeded };
     };
 
     const maintenanceStatus = checkMaintenanceStatus();
@@ -1504,6 +1499,197 @@ export const AdminDashboard = ({ user, userData, onLogout, onSwitchToUser, confi
                 }
             }
         });
+    };
+
+    const handleChecklistMaintenance = async () => {
+        try {
+            const zip = new JSZip();
+            const maintenance = config?.maintenance || {};
+            const now = new Date();
+            const monthLabel = now.toLocaleString('default', { month: 'long', year: 'numeric' });
+
+            // STEP 1 — Fetch all checklists
+            setMaintenanceProgress({ phase: 'checklists', step: 'fetching', percent: 5, label: 'Fetching checklist data...' });
+
+            const checklistSnap = await getDocs(collection(db, 'artifacts', appId, 'public', 'data', 'checklists'));
+            const checklistDocs = checklistSnap.docs.map(d => ({ id: d.id, ...d.data() }));
+
+            const reportSnap = await getDocs(collection(db, 'artifacts', appId, 'public', 'data', 'checklist_reports'));
+            const reportDocs = reportSnap.docs.map(d => ({ id: d.id, ...d.data() }));
+
+            const totalDocs = checklistDocs.length + reportDocs.length;
+            setMaintenanceProgress({ phase: 'checklists', step: 'fetching', percent: 25, label: `Fetched ${totalDocs} documents...` });
+
+            if (totalDocs === 0) {
+                setMaintenanceProgress({ phase: 'checklists', step: 'done', percent: 100, label: 'No checklist data to clear.' });
+                await new Promise(r => setTimeout(r, 1500));
+                setMaintenanceProgress(null);
+                toast.success('No checklist data found.');
+                return;
+            }
+
+            // STEP 2 — Build daily checklists Excel rows
+            setMaintenanceProgress({ phase: 'checklists', step: 'downloading', percent: 30, label: 'Building Excel files...' });
+            const dailyRows = [];
+            const monthlyRows = [];
+
+            checklistDocs.forEach(doc => {
+                const items = doc.items || {};
+                const committeeLabel = COMMITTEE_ROLES[doc.committeeRole] || doc.committeeRole || '';
+
+                if (doc.date) {
+                    // Daily checklist
+                    Object.entries(items).forEach(([itemId, meals]) => {
+                        const itemText = Object.values(COMMITTEE_CHECKLISTS)
+                            .flatMap(c => [...(c.daily || []), ...(c.monthly || [])])
+                            .find(i => i.id === itemId)?.text || '';
+
+                        if (meals.Breakfast !== undefined) {
+                            ['Breakfast', 'Lunch', 'Dinner'].forEach(meal => {
+                                const entry = meals[meal] || {};
+                                dailyRows.push({
+                                    'Date': doc.date,
+                                    'Hostel': doc.hostel || '',
+                                    'Committee': committeeLabel,
+                                    'Item ID': itemId,
+                                    'Item': itemText,
+                                    'Meal': meal,
+                                    'Status': entry.status || '',
+                                    'Remarks': entry.remarks || '',
+                                    'Submitted': doc.submitted ? 'Yes' : 'No',
+                                    'Auto Submitted': doc.autoSubmitted ? 'Yes' : 'No',
+                                    'Submitted By': doc.submittedBy || '',
+                                });
+                            });
+                        } else {
+                            // Monthly checklist item
+                            monthlyRows.push({
+                                'Month': doc.month || '',
+                                'Hostel': doc.hostel || '',
+                                'Committee': committeeLabel,
+                                'Item ID': itemId,
+                                'Item': itemText,
+                                'Status': meals.status || '',
+                                'Remarks': meals.remarks || '',
+                                'Submitted': doc.submitted ? 'Yes' : 'No',
+                                'Submitted By': doc.submittedBy || '',
+                            });
+                        }
+                    });
+                } else if (doc.month) {
+                    // Monthly checklist doc
+                    Object.entries(items).forEach(([itemId, entry]) => {
+                        const itemText = Object.values(COMMITTEE_CHECKLISTS)
+                            .flatMap(c => [...(c.daily || []), ...(c.monthly || [])])
+                            .find(i => i.id === itemId)?.text || '';
+
+                        monthlyRows.push({
+                            'Month': doc.month || '',
+                            'Hostel': doc.hostel || '',
+                            'Committee': committeeLabel,
+                            'Item ID': itemId,
+                            'Item': itemText,
+                            'Status': entry.status || '',
+                            'Remarks': entry.remarks || '',
+                            'Submitted': doc.submitted ? 'Yes' : 'No',
+                            'Submitted By': doc.submittedBy || '',
+                        });
+                    }
+                    );
+                }
+            });
+
+            // STEP 3 — Build reports summary rows
+            const reportRows = reportDocs.map(r => ({
+                'Date': r.date || '',
+                'Total Submitted': r.totalSubmitted || 0,
+                'Total Missing': r.totalMissing || 0,
+                'Total Failed Items': r.totalFailed || 0,
+                'Generated At': r.generatedAt ? new Date(r.generatedAt.seconds ? r.generatedAt.seconds * 1000 : r.generatedAt).toLocaleString() : ''
+            }));
+
+            // STEP 4 — Create Excel files and add to ZIP
+            setMaintenanceProgress({ phase: 'checklists', step: 'downloading', percent: 45, label: 'Creating Excel sheets...' });
+
+            if (dailyRows.length > 0) {
+                const ws1 = XLSX.utils.json_to_sheet(dailyRows);
+                const wb1 = XLSX.utils.book_new();
+                XLSX.utils.book_append_sheet(wb1, ws1, 'Daily Checklists');
+                const excelBuffer1 = XLSX.write(wb1, { bookType: 'xlsx', type: 'array' });
+                zip.file(`Daily_Checklists_${monthLabel.replace(/ /g, '_')}.xlsx`, excelBuffer1);
+            }
+
+            if (monthlyRows.length > 0) {
+                const ws2 = XLSX.utils.json_to_sheet(monthlyRows);
+                const wb2 = XLSX.utils.book_new();
+                XLSX.utils.book_append_sheet(wb2, ws2, 'Monthly Checklists');
+                const excelBuffer2 = XLSX.write(wb2, { bookType: 'xlsx', type: 'array' });
+                zip.file(`Monthly_Checklists_${monthLabel.replace(/ /g, '_')}.xlsx`, excelBuffer2);
+            }
+
+            if (reportRows.length > 0) {
+                const ws3 = XLSX.utils.json_to_sheet(reportRows);
+                const wb3 = XLSX.utils.book_new();
+                XLSX.utils.book_append_sheet(wb3, ws3, 'Daily Reports Summary');
+                const excelBuffer3 = XLSX.write(wb3, { bookType: 'xlsx', type: 'array' });
+                zip.file(`Checklist_Reports_${monthLabel.replace(/ /g, '_')}.xlsx`, excelBuffer3);
+            }
+
+            setMaintenanceProgress({ phase: 'checklists', step: 'downloading', percent: 55, label: 'Compressing data...' });
+            const content = await zip.generateAsync({ type: 'blob' }, (metadata) => {
+                setMaintenanceProgress({ phase: 'checklists', step: 'downloading', percent: Math.round(55 + metadata.percent * 0.05), label: `Compressing... ${Math.round(metadata.percent)}%` });
+            });
+
+            // STEP 5 — Download ZIP
+            setMaintenanceProgress({ phase: 'checklists', step: 'downloading', percent: 62, label: 'Downloading ZIP to your device...' });
+            const url = URL.createObjectURL(content);
+            const link = document.createElement('a');
+            link.href = url;
+            link.download = `MessMeal_Checklists_${monthLabel.replace(/ /g, '_')}.zip`;
+            link.click();
+            URL.revokeObjectURL(url);
+
+            setMaintenanceProgress({ phase: 'checklists', step: 'downloading', percent: 70, label: 'Download started!' });
+            await new Promise(r => setTimeout(r, 800));
+
+            // STEP 6 — Delete checklists in chunks
+            setMaintenanceProgress({ phase: 'checklists', step: 'deleting', percent: 72, label: 'Clearing checklist data...' });
+            const allDocs = [...checklistSnap.docs, ...reportSnap.docs];
+            const total = allDocs.length;
+            let deleted = 0;
+            const chunkSize = 490;
+
+            for (let i = 0; i < allDocs.length; i += chunkSize) {
+                const chunk = allDocs.slice(i, i + chunkSize);
+                const batch = writeBatch(db);
+                chunk.forEach(d => batch.delete(d.ref));
+                await batch.commit();
+                deleted += chunk.length;
+                const percent = Math.round(72 + (deleted / total) * 23);
+                setMaintenanceProgress({ phase: 'checklists', step: 'deleting', percent, label: `Deleted ${deleted} of ${total} documents...` });
+            }
+
+            // STEP 7 — Save timestamp
+            setMaintenanceProgress({ phase: 'checklists', step: 'deleting', percent: 96, label: 'Saving maintenance record...' });
+            await onUpdateConfig({
+                maintenance: { ...maintenance, lastChecklistReset: now.toISOString() }
+            });
+
+            setMaintenanceProgress({ phase: 'checklists', step: 'done', percent: 100, label: '✓ Checklist maintenance complete!' });
+            await new Promise(r => setTimeout(r, 1500));
+            setMaintenanceProgress(null);
+
+            setSuccessModal({
+                isOpen: true,
+                title: 'Checklists Cleared! ✓',
+                message: `${checklistDocs.length} checklists and ${reportDocs.length} reports backed up as ZIP and cleared from the database. Next reminder in 1 month.`
+            });
+
+        } catch (error) {
+            console.error('Checklist maintenance error:', error);
+            setMaintenanceProgress(null);
+            toast.error(`Maintenance failed: ${error.message || 'Unknown error'}`);
+        }
     };
 
     const handleMaintenanceCleanup = async (type) => {
@@ -2991,6 +3177,43 @@ export const AdminDashboard = ({ user, userData, onLogout, onSwitchToUser, confi
                                 })}
                             </div>
                         )}
+
+                        <Card className="mt-8 bg-amber-50 dark:bg-amber-900/10 border border-amber-200 dark:border-amber-500/20">
+                            <h3 className="font-heading font-bold text-lg text-amber-700 dark:text-amber-400 mb-2 flex items-center gap-2">
+                                <ShieldAlert size={20} />
+                                Checklist Maintenance
+                            </h3>
+                            <p className="text-xs text-zinc-600 dark:text-zinc-400 font-medium mb-4">
+                                Download all checklist data as Excel files inside a ZIP backup, then clear the database. Run this monthly after reviewing the data.
+                            </p>
+                            {config?.maintenance?.lastChecklistReset && (
+                                <p className="text-[11px] font-bold text-zinc-400 mb-4">
+                                    Last cleared:{' '}
+                                    {new Date(config.maintenance.lastChecklistReset).toLocaleDateString([], {
+                                        day: 'numeric',
+                                        month: 'long',
+                                        year: 'numeric'
+                                    })}
+                                </p>
+                            )}
+                            <Button
+                                onClick={() => {
+                                    setConfirmModal({
+                                        isOpen: true,
+                                        title: 'Run Checklist Maintenance?',
+                                        message: 'This will download ALL checklist and report data as Excel files in a ZIP backup, then permanently clear them from the database. This cannot be undone.',
+                                        isDestructive: true,
+                                        onConfirm: async () => {
+                                            setConfirmModal(prev => ({ ...prev, isOpen: false }));
+                                            await handleChecklistMaintenance();
+                                        }
+                                    });
+                                }}
+                                className="w-full py-3 bg-amber-500 hover:bg-amber-600 text-white font-black uppercase tracking-widest"
+                            >
+                                Run Checklist Maintenance
+                            </Button>
+                        </Card>
                     </div>
                 );
             }
@@ -4131,7 +4354,7 @@ export const AdminDashboard = ({ user, userData, onLogout, onSwitchToUser, confi
             <OfflineIndicator />
 
             {/* ── MAINTENANCE REMINDER POPUP (NON-BLOCKING) ───────────── */}
-            {(maintenanceStatus.ratingsNeeded || maintenanceStatus.proofsNeeded) && showMaintenancePopup && (
+            {(maintenanceStatus.ratingsNeeded || maintenanceStatus.proofsNeeded || maintenanceStatus.checklistsNeeded) && showMaintenancePopup && (
                 <div className="fixed bottom-5 right-5 z-[90] w-full max-w-sm space-y-3">
 
                     {maintenanceStatus.ratingsNeeded && (
@@ -4174,6 +4397,41 @@ export const AdminDashboard = ({ user, userData, onLogout, onSwitchToUser, confi
                                 className="w-full py-2 text-xs font-bold bg-amber-500 hover:bg-amber-600 text-white"
                             >
                                 Run Ratings Maintenance
+                            </Button>
+                        </div>
+                    )}
+
+                    {maintenanceStatus.checklistsNeeded && (
+                        <div className="bg-white dark:bg-zinc-900 border border-amber-500/30 rounded-2xl shadow-2xl p-5">
+                            <div className="flex items-start justify-between gap-3 mb-3">
+                                <div className="flex items-center gap-2">
+                                    <div className="p-2 rounded-xl bg-amber-500/10">
+                                        <ClipboardList size={16} className="text-amber-500" />
+                                    </div>
+                                    <div>
+                                        <h3 className="text-sm font-black text-dark dark:text-white">
+                                            Monthly Checklist Cleanup
+                                        </h3>
+                                        <p className="text-[11px] text-zinc-500">
+                                            Checklist data from last month is due for archiving.
+                                        </p>
+                                    </div>
+                                </div>
+                                <button
+                                    onClick={() => setShowMaintenancePopup(false)}
+                                    className="text-zinc-400 hover:text-zinc-600 text-xs"
+                                >
+                                    <X size={14} />
+                                </button>
+                            </div>
+                            <Button
+                                onClick={() => {
+                                    setShowMaintenancePopup(false);
+                                    setActiveTab('checklists');
+                                }}
+                                className="w-full py-2 text-xs font-bold bg-amber-500 hover:bg-amber-600 text-white"
+                            >
+                                Go to Checklist Maintenance
                             </Button>
                         </div>
                     )}
