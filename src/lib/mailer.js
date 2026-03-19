@@ -11,9 +11,19 @@ const TEMPLATES = {
 
 export const sendAdminNotificationEmail = async (toEmail, role, actionType) => {
   try {
+    if (!EMAILJS_SERVICE_ID || !EMAILJS_PUBLIC_KEY) {
+      console.warn(
+        'EmailJS not configured. ' +
+        'Add VITE_EMAILJS_SERVICE_ID and ' +
+        'VITE_EMAILJS_PUBLIC_KEY to ' +
+        'Vercel environment variables.'
+      );
+      return;
+    }
+
     const templateId = TEMPLATES[actionType];
     if (!templateId) {
-      console.error('No template found for actionType:', actionType);
+      console.warn(`No template found for action: ${actionType}`);
       return;
     }
 
@@ -36,6 +46,5 @@ export const sendAdminNotificationEmail = async (toEmail, role, actionType) => {
     console.log(`Email sent to ${toEmail} for ${actionType}`);
   } catch (error) {
     console.error('EmailJS error:', error);
-    // Do not crash app if email fails
   }
 };

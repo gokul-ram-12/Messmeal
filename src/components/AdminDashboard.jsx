@@ -143,6 +143,13 @@ export const AdminDashboard = ({ user, userData, onLogout, onSwitchToUser, confi
     const [checklistCommitteeFilter, setChecklistCommitteeFilter] = useState('all');
     const [checklistHostelFilter, setChecklistHostelFilter] = useState('ALL');
 
+    const [closureList, setClosureList] = useState([]);
+    const [isLoadingClosures, setIsLoadingClosures] = useState(false);
+    const [closureHostelFilter, setClosureHostelFilter] = useState('ALL');
+    const [closureMessTypeFilter, setClosureMessTypeFilter] = useState('ALL');
+    const [closureDateFrom, setClosureDateFrom] = useState('');
+    const [closureDateTo, setClosureDateTo] = useState('');
+
     // Notice state (targeting)
     const [noticeTitle, setNoticeTitle] = useState('');
     const [noticeMessage, setNoticeMessage] = useState('');
@@ -396,6 +403,34 @@ export const AdminDashboard = ({ user, userData, onLogout, onSwitchToUser, confi
         return () => unsub();
     }, [user]);
 
+    useEffect(() => {
+        if (activeTab !== 'menus') return;
+        setIsLoadingClosures(true);
+
+        const thirtyDaysAgo = new Date();
+        thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
+        const fromDate = thirtyDaysAgo.toLocaleDateString('en-CA');
+
+        const q = query(
+            collection(db, 'artifacts', appId, 'public', 'data', 'mess_closures'),
+            where('date', '>=', fromDate),
+            orderBy('date', 'desc')
+        );
+
+        const unsub = onSnapshot(q, (snap) => {
+            const list = snap.docs.map(d => ({
+                id: d.id,
+                ...d.data()
+            }));
+            setClosureList(list);
+            setIsLoadingClosures(false);
+        }, () => {
+            setIsLoadingClosures(false);
+        });
+
+        return () => unsub();
+    }, [activeTab]);
+
     // Fetch existing menu for editing (MONTHLY FORMAT)
     useEffect(() => {
         if (activeTab !== 'menus' || !menuDate) return;
@@ -545,16 +580,27 @@ export const AdminDashboard = ({ user, userData, onLogout, onSwitchToUser, confi
         }
     };
 
-    const approveUser = async (userId) => {
+    const approveUser = async (userId, userData) => {
         try {
-            await updateDoc(doc(db, 'artifacts', appId, 'users', userId), { approved: true });
+            const updateData = { approved: true };
+            if (userData?.role === 'revoked') {
+                updateData.role = userData.previousRole ||
+                    (userData.email.includes('faculty') ?
+                        'faculty' : 'student');
+            }
+            await updateDoc(
+                doc(db, 'artifacts', appId, 'users', userId),
+                updateData
+            );
             setSuccessModal({
                 isOpen: true,
                 title: "User Approved!",
-                message: "This user can now access the relevant portals and features."
+                message: "User can now access the portal."
             });
             toast.success("User approved!");
-        } catch { toast.error("Failed to approve user"); }
+        } catch {
+            toast.error("Failed to approve user");
+        }
     };
 
     const exportChecklistExcel = () => {
@@ -691,27 +737,33 @@ export const AdminDashboard = ({ user, userData, onLogout, onSwitchToUser, confi
         return () => clearInterval(interval);
     }, [isSuperAdmin]);
 
-    const revokeUser = (userId) => {
+    const revokeUser = (userId, currentRole) => {
         setConfirmModal({
             isOpen: true,
             title: "Revoke Access",
-            message: "Are you sure you want to revoke this user's access? They will no longer be able to log in.",
+            message: "Are you sure you want to revoke this user's access?",
             isDestructive: true,
             onConfirm: async () => {
                 setConfirmModal(prev => ({ ...prev, isOpen: false }));
                 try {
-                    await updateDoc(doc(db, 'artifacts', appId, 'users', userId), {
-                        role: 'revoked',
-                        approved: false,
-                        updatedAt: serverTimestamp()
-                    });
+                    await updateDoc(
+                        doc(db, 'artifacts', appId, 'users', userId),
+                        {
+                            previousRole: currentRole,
+                            role: 'revoked',
+                            approved: false,
+                            updatedAt: serverTimestamp()
+                        }
+                    );
                     setSuccessModal({
                         isOpen: true,
                         title: "Access Revoked!",
-                        message: "The user's access has been successfully restricted."
+                        message: "The user's access has been restricted."
                     });
                     toast.success("User access revoked.");
-                } catch { toast.error("Failed to revoke access"); }
+                } catch {
+                    toast.error("Failed to revoke access");
+                }
             }
         });
     };
@@ -1296,6 +1348,25 @@ export const AdminDashboard = ({ user, userData, onLogout, onSwitchToUser, confi
         setSchedulingClosure(false);
     };
 
+    const deleteScheduledClosure = (closureId, date, hostel) => {
+        setConfirmModal({
+            isOpen: true,
+            title: 'Delete Scheduled Closure?',
+            message: `This will permanently remove the mess closure for ${hostel} on ${date}. Students will see the menu as normal.`,
+            isDestructive: true,
+            onConfirm: async () => {
+                setConfirmModal(prev => ({ ...prev, isOpen: false }));
+                try {
+                    await deleteDoc(
+                        doc(db, 'artifacts', appId, 'public', 'data', 'mess_closures', closureId)
+                    );
+                    toast.success('Closure removed successfully.');
+                } catch {
+                    toast.error('Failed to remove closure.');
+                }
+            }
+        });
+    };
 
     const processCSV = async () => {
         if (!csvFile) return;
@@ -2502,6 +2573,171 @@ export const AdminDashboard = ({ user, userData, onLogout, onSwitchToUser, confi
                             >
                                 Schedule Closure
                             </Button>
+                        </Card>
+
+                        {/* Closure History */}
+                        <Card className="bg-white dark:bg-[#16162A] border border-zinc-200 dark:border-white/10 mt-4">
+                            <h3 className="font-heading font-bold text-lg text-dark dark:text-white mb-2 flex items-center gap-2">
+                                <Calendar size={20} className="text-primary" />
+                                Scheduled Closures History
+                            </h3>
+                            <p className="text-xs text-zinc-400 font-medium mb-4">
+                                Showing past 30 days and all future scheduled closures.
+                            </p>
+
+                            {/* Filter Bar */}
+                            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-4">
+                                <Select
+                                    label="Hostel"
+                                    value={closureHostelFilter}
+                                    onChange={setClosureHostelFilter}
+                                    options={getHostelOptions(true)}
+                                />
+                                <Select
+                                    label="Mess Type"
+                                    value={closureMessTypeFilter}
+                                    onChange={setClosureMessTypeFilter}
+                                    options={getMessTypeOptions(true)}
+                                />
+                                <div>
+                                    <label className="block text-[10px] font-black text-zinc-500 uppercase tracking-widest mb-2">
+                                        From Date
+                                    </label>
+                                    <input
+                                        type="date"
+                                        value={closureDateFrom}
+                                        onChange={(e) => setClosureDateFrom(e.target.value)}
+                                        className="w-full p-2.5 bg-zinc-50 dark:bg-black/40 border border-zinc-200 dark:border-white/10 rounded-xl outline-none focus:border-primary text-sm text-dark dark:text-white"
+                                    />
+                                </div>
+                                <div>
+                                    <label className="block text-[10px] font-black text-zinc-500 uppercase tracking-widest mb-2">
+                                        To Date
+                                    </label>
+                                    <input
+                                        type="date"
+                                        value={closureDateTo}
+                                        onChange={(e) => setClosureDateTo(e.target.value)}
+                                        className="w-full p-2.5 bg-zinc-50 dark:bg-black/40 border border-zinc-200 dark:border-white/10 rounded-xl outline-none focus:border-primary text-sm text-dark dark:text-white"
+                                    />
+                                </div>
+                            </div>
+
+                            {/* Reset Filters */}
+                            <button
+                                onClick={() => {
+                                    setClosureHostelFilter('ALL');
+                                    setClosureMessTypeFilter('ALL');
+                                    setClosureDateFrom('');
+                                    setClosureDateTo('');
+                                }}
+                                className="text-[10px] font-black text-zinc-400 hover:text-primary uppercase tracking-widest mb-4 flex items-center gap-1"
+                            >
+                                <RefreshCw size={10} /> Reset Filters
+                            </button>
+
+                            {/* Table */}
+                            {isLoadingClosures ? (
+                                <div className="space-y-2">
+                                    {[1, 2, 3].map(i => (
+                                        <div key={i} className="h-12 w-full bg-zinc-100 dark:bg-white/5 animate-pulse rounded-xl" />
+                                    ))}
+                                </div>
+                            ) : (() => {
+                                const filtered = closureList.filter(c => {
+                                    const matchHostel = closureHostelFilter === 'ALL' || c.hostel === closureHostelFilter;
+                                    const matchMessType = closureMessTypeFilter === 'ALL' || c.messType === closureMessTypeFilter;
+                                    const matchFrom = !closureDateFrom || c.date >= closureDateFrom;
+                                    const matchTo = !closureDateTo || c.date <= closureDateTo;
+                                    return matchHostel && matchMessType && matchFrom && matchTo;
+                                });
+
+                                if (filtered.length === 0) {
+                                    return (
+                                        <div className="text-center py-8 border-2 border-dashed border-zinc-200 dark:border-white/5 rounded-2xl">
+                                            <p className="text-xs font-black text-zinc-400 uppercase tracking-widest">
+                                                No closures found
+                                            </p>
+                                        </div>
+                                    );
+                                }
+
+                                const today = new Date().toLocaleDateString('en-CA');
+
+                                return (
+                                    <div className="overflow-x-auto rounded-2xl border border-zinc-200 dark:border-white/10">
+                                        <table className="w-full text-left border-collapse">
+                                            <thead>
+                                                <tr className="border-b border-zinc-200 dark:border-white/10 bg-zinc-50 dark:bg-black/20">
+                                                    <th className="p-4 text-xs font-black text-zinc-400 uppercase tracking-widest">
+                                                        Date
+                                                    </th>
+                                                    <th className="p-4 text-xs font-black text-zinc-400 uppercase tracking-widest">
+                                                        Hostel
+                                                    </th>
+                                                    <th className="p-4 text-xs font-black text-zinc-400 uppercase tracking-widest">
+                                                        Mess Type
+                                                    </th>
+                                                    <th className="p-4 text-xs font-black text-zinc-400 uppercase tracking-widest">
+                                                        Reason
+                                                    </th>
+                                                    <th className="p-4 text-xs font-black text-zinc-400 uppercase tracking-widest">
+                                                        Status
+                                                    </th>
+                                                    <th className="p-4 text-xs font-black text-zinc-400 uppercase tracking-widest text-right">
+                                                        Action
+                                                    </th>
+                                                </tr>
+                                            </thead>
+                                            <tbody className="divide-y divide-zinc-100 dark:divide-white/5">
+                                                {filtered.map(c => {
+                                                    const isPast = c.date < today;
+                                                    const isToday = c.date === today;
+                                                    return (
+                                                        <tr key={c.id} className="hover:bg-zinc-50 dark:hover:bg-white/5 transition-colors">
+                                                            <td className="p-4 text-sm font-bold text-dark dark:text-white">
+                                                                {c.date}
+                                                                {isToday && (
+                                                                    <span className="ml-2 text-[9px] font-black text-primary uppercase bg-primary/10 px-1.5 py-0.5 rounded-full">
+                                                                        Today
+                                                                    </span>
+                                                                )}
+                                                            </td>
+                                                            <td className="p-4 text-sm font-medium text-zinc-600 dark:text-zinc-300">
+                                                                {c.hostel}
+                                                            </td>
+                                                            <td className="p-4 text-sm font-medium text-zinc-600 dark:text-zinc-300">
+                                                                {c.messType}
+                                                            </td>
+                                                            <td className="p-4 text-sm font-medium text-zinc-600 dark:text-zinc-300 max-w-[180px] truncate">
+                                                                {c.reason || 'Holiday / Special Event'}
+                                                            </td>
+                                                            <td className="p-4">
+                                                                <span className={`text-[10px] font-black px-2 py-1 rounded-full uppercase tracking-wider ${isPast ? 'bg-zinc-100 dark:bg-white/5 text-zinc-400' : isToday ? 'bg-primary/10 text-primary' : 'bg-red-50 dark:bg-red-900/20 text-red-500'}`}>
+                                                                    {isPast ? 'Past' : isToday ? 'Today' : 'Scheduled'}
+                                                                </span>
+                                                            </td>
+                                                            <td className="p-4 text-right">
+                                                                {!isPast && (
+                                                                    <button
+                                                                        onClick={() => deleteScheduledClosure(c.id, c.date, c.hostel)}
+                                                                        className="text-xs py-1.5 px-3 rounded-xl bg-error/10 text-error border border-error/30 hover:bg-error hover:text-white transition-all font-bold"
+                                                                    >
+                                                                        Delete
+                                                                    </button>
+                                                                )}
+                                                                {isPast && (
+                                                                    <span className="text-[10px] text-zinc-300 font-bold">—</span>
+                                                                )}
+                                                            </td>
+                                                        </tr>
+                                                    );
+                                                })}
+                                            </tbody>
+                                        </table>
+                                    </div>
+                                );
+                            })()}
                         </Card>
                     </div >
                 );
@@ -3827,16 +4063,32 @@ export const AdminDashboard = ({ user, userData, onLogout, onSwitchToUser, confi
                                                     </Badge>
                                                 </td>
                                                 <td className="p-5 text-right w-1 min-w-[120px]">
-                                                    {!u.approved ? (
+                                                    {u.role === 'revoked' ? (
                                                         <button
-                                                            onClick={(e) => { e.stopPropagation(); approveUser(u.id); }}
+                                                            onClick={(e) => {
+                                                                e.stopPropagation();
+                                                                approveUser(u.id, u);
+                                                            }}
+                                                            className="text-xs py-2 px-4 rounded-xl bg-amber-500/10 text-amber-600 border border-amber-500/30 hover:bg-amber-500 hover:text-white sm:opacity-0 group-hover:opacity-100 transition-all focus:opacity-100 outline-none font-bold"
+                                                        >
+                                                            Restore Access
+                                                        </button>
+                                                    ) : !u.approved ? (
+                                                        <button
+                                                            onClick={(e) => {
+                                                                e.stopPropagation();
+                                                                approveUser(u.id, u);
+                                                            }}
                                                             className="text-xs py-2 px-4 rounded-xl bg-success/10 text-success border border-success/30 hover:bg-success hover:text-white sm:opacity-0 group-hover:opacity-100 transition-all focus:opacity-100 outline-none font-bold"
                                                         >
                                                             Approve
                                                         </button>
                                                     ) : u.role !== 'super_admin' && (
                                                         <button
-                                                            onClick={(e) => { e.stopPropagation(); revokeUser(u.id); }}
+                                                            onClick={(e) => {
+                                                                e.stopPropagation();
+                                                                revokeUser(u.id, u.role);
+                                                            }}
                                                             className="text-xs py-2 px-4 rounded-xl bg-error/10 text-error border border-error/30 hover:bg-error hover:text-white sm:opacity-0 group-hover:opacity-100 transition-all focus:opacity-100 outline-none font-bold"
                                                         >
                                                             Revoke
