@@ -4083,7 +4083,7 @@ export const AdminDashboard = ({ user, userData, onLogout, onSwitchToUser, confi
                                                         >
                                                             Approve
                                                         </button>
-                                                    ) : u.role !== 'super_admin' && (
+                                                    ) : u.role === 'admin' && (
                                                         <button
                                                             onClick={(e) => {
                                                                 e.stopPropagation();
