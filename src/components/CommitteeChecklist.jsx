@@ -6,7 +6,7 @@ import {
 import { COMMITTEE_CHECKLISTS, COMMITTEE_ROLES } from
     '../lib/constants';
 import { CheckCircle2, XCircle, Clock, Save,
-    ClipboardList, AlertTriangle } from 'lucide-react';
+    ClipboardList, AlertTriangle, MessageSquare } from 'lucide-react';
 import { toast } from 'react-hot-toast';
 import { Button } from './ui/Button';
 import { Card } from './ui/Card';
@@ -44,9 +44,9 @@ export const CommitteeChecklist = ({ user, userData }) => {
 
     const isDailyLocked = (() => {
         const now = new Date();
-        const todayStr =
-            new Date().toLocaleDateString('en-CA');
-        if (todayStr > todayStr) return true;
+        const currentDayStr =
+            now.toLocaleDateString('en-CA');
+        if (currentDayStr > todayStr) return true;
         const totalSeconds =
             now.getHours() * 3600 +
             now.getMinutes() * 60 +
@@ -73,7 +73,7 @@ export const CommitteeChecklist = ({ user, userData }) => {
         const unsub = onSnapshot(ref, (snap) => {
             if (snap.exists()) {
                 const data = snap.data();
-                setDailyData(data.items || {});
+                setDailyData(data || {});
                 setDailySubmitted(data.submitted || false);
                 setLastEditedBy(data.lastEditedBy || null);
                 setLastEditedAt(data.lastEditedAt || null);
@@ -242,6 +242,32 @@ export const CommitteeChecklist = ({ user, userData }) => {
         }
     };
 
+    const updateSessionRemark = async (meal, value) => {
+        if (isDailyLocked) return;
+        const ref = doc(db, 'artifacts', appId,
+            'public', 'data', 'checklists',
+            dailyDocId);
+        try {
+            await setDoc(ref, {
+                committeeRole,
+                hostel,
+                date: todayStr,
+                submitted: false
+            }, { merge: true });
+
+            await updateDoc(ref, {
+                [`sessionRemarks.${meal}`]: value,
+                lastEditedBy:
+                    userData?.name || user?.email,
+                lastEditedAt: new Date().toISOString()
+            });
+        } catch (e) {
+            console.error(
+                'Session remark save failed:', e
+            );
+        }
+    };
+
     // Validate before final submit
     const validateAndSubmitDaily = async () => {
         const items = checklist.daily;
@@ -250,7 +276,7 @@ export const CommitteeChecklist = ({ user, userData }) => {
                 ['Breakfast', 'Lunch', 'Dinner']
             ) {
                 const entry =
-                    dailyData[item.id]?.[meal] || {};
+                    dailyData?.items?.[item.id]?.[meal] || {};
                 if (entry.status === '✗' &&
                     !entry.remarks?.trim()
                 ) {
@@ -627,7 +653,7 @@ export const CommitteeChecklist = ({ user, userData }) => {
                                     {['Breakfast', 'Lunch',
                                         'Dinner'].map(meal => {
                                         const entry =
-                                            dailyData[item.id]
+                                            dailyData?.items?.[item.id]
                                                 ?.[meal] || {};
                                         return (
                                             <div key={meal}
@@ -732,6 +758,63 @@ export const CommitteeChecklist = ({ user, userData }) => {
                                 </div>
                             );
                         })}
+                    </div>
+
+                    {/* Overall Session Remarks */}
+                    <div className="mt-6 pt-6 border-t
+                        border-zinc-100 dark:border-white/5">
+                        <h4 className="text-xs font-black
+                            text-zinc-500 uppercase tracking-widest
+                            mb-4 flex items-center gap-2">
+                            <MessageSquare size={14} />
+                            Overall Session Remarks (Optional)
+                        </h4>
+                        <div className="grid grid-cols-1
+                            sm:grid-cols-3 gap-4">
+                            {['Breakfast', 'Lunch', 'Dinner'].map(
+                                meal => (
+                                <div key={meal}>
+                                    <label className="block
+                                        text-[10px] font-black
+                                        text-zinc-400 uppercase
+                                        tracking-widest mb-2">
+                                        {meal}
+                                    </label>
+                                    <textarea
+                                        disabled={isDailyLocked}
+                                        value={
+                                            dailyData
+                                                ?.sessionRemarks
+                                                ?.[meal] || ''
+                                        }
+                                        onChange={(e) =>
+                                            updateSessionRemark(
+                                                meal,
+                                                e.target.value
+                                            )}
+                                        placeholder={
+                                            `Overall remarks for ${meal}...`}
+                                        rows={3}
+                                        className={`w-full p-3
+                                            text-sm bg-zinc-50
+                                            dark:bg-black/20 border
+                                            border-zinc-200
+                                            dark:border-white/10
+                                            rounded-xl outline-none
+                                            focus:border-primary
+                                            focus:ring-2
+                                            focus:ring-primary/20
+                                            text-dark dark:text-white
+                                            placeholder-zinc-400
+                                            resize-none transition-all
+                                            ${isDailyLocked
+                                                ? 'opacity-60 cursor-not-allowed'
+                                                : ''
+                                            }`}
+                                    />
+                                </div>
+                            ))}
+                        </div>
                     </div>
 
                     {!isDailyLocked && (

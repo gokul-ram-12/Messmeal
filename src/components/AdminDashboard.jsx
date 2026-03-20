@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { motion } from 'framer-motion';
-import { collection, query, onSnapshot, doc, getDoc, updateDoc, setDoc, deleteDoc, serverTimestamp, writeBatch, getDocs, where, orderBy, limit, addDoc } from 'firebase/firestore';
+import { collection, query, onSnapshot, doc, getDoc, updateDoc, setDoc, deleteDoc, serverTimestamp, writeBatch, getDocs, where, orderBy, limit, addDoc, startAfter } from 'firebase/firestore';
 import { db, appId } from '../lib/firebase';
 import { sendAdminNotificationEmail } from '../lib/mailer';
 import { LayoutDashboard, Users, Utensils, Megaphone, FileSpreadsheet, Settings, LogOut, Search, Check, X, Bell, Crown, Save, Calendar, BarChart3, ChevronRight, Menu as MenuIcon, AlertTriangle, Star, ImageIcon, Eye, Download, Shield, User, Clock4, PlusCircle, Trash2, RefreshCw, Globe, MessageSquare, CheckCircle2, Sparkles, ShieldAlert, ShieldCheck, FileText, Menu, Bug, ClipboardList, XCircle, Trophy } from 'lucide-react';
@@ -127,6 +127,16 @@ export const AdminDashboard = ({ user, userData, onLogout, onSwitchToUser, confi
     // Pagination states
     const [usersPage, setUsersPage] = useState(1);
     const USERS_PER_PAGE = 30;
+    const [usersLoading, setUsersLoading] =
+        useState(false);
+    const [usersTotalCount, setUsersTotalCount] =
+        useState(0);
+    const [lastVisibleUser, setLastVisibleUser] =
+        useState(null);
+    const [firstVisibleUser, setFirstVisibleUser] =
+        useState(null);
+    const [userPageStack, setUserPageStack] =
+        useState([]);
 
     // Proof filters state
     const [proofDateFilter, setProofDateFilter] = useState('');
@@ -262,20 +272,94 @@ export const AdminDashboard = ({ user, userData, onLogout, onSwitchToUser, confi
         return () => clearInterval(timer);
     }, []);
 
-    // Fetch users
+    // Fetch users (paginated getDocs)
+    const fetchUsersPage = async (
+        direction = 'first'
+    ) => {
+        setUsersLoading(true);
+        try {
+            let q;
+            if (direction === 'first') {
+                q = query(
+                    collection(db, 'artifacts',
+                        appId, 'users'),
+                    orderBy('createdAt', 'desc'),
+                    limit(30)
+                );
+            } else if (direction === 'next' &&
+                lastVisibleUser) {
+                q = query(
+                    collection(db, 'artifacts',
+                        appId, 'users'),
+                    orderBy('createdAt', 'desc'),
+                    startAfter(lastVisibleUser),
+                    limit(30)
+                );
+            } else if (direction === 'prev' &&
+                userPageStack.length > 1) {
+                const prevStack = [...userPageStack];
+                prevStack.pop();
+                const prevCursor =
+                    prevStack[prevStack.length - 1];
+                setUserPageStack(prevStack);
+                q = query(
+                    collection(db, 'artifacts',
+                        appId, 'users'),
+                    orderBy('createdAt', 'desc'),
+                    startAfter(prevCursor),
+                    limit(30)
+                );
+            } else {
+                q = query(
+                    collection(db, 'artifacts',
+                        appId, 'users'),
+                    orderBy('createdAt', 'desc'),
+                    limit(30)
+                );
+            }
+
+            const snap = await getDocs(q);
+            const list = snap.docs.map(d => ({
+                id: d.id, ...d.data()
+            }));
+            setUsersList(list);
+
+            if (snap.docs.length > 0) {
+                setLastVisibleUser(
+                    snap.docs[snap.docs.length - 1]
+                );
+                setFirstVisibleUser(snap.docs[0]);
+                if (direction === 'next') {
+                    setUserPageStack(prev => [
+                        ...prev,
+                        snap.docs[snap.docs.length - 1]
+                    ]);
+                } else if (direction === 'first') {
+                    setUserPageStack([
+                        snap.docs[snap.docs.length - 1]
+                    ]);
+                }
+            }
+
+            if (direction === 'first') {
+                const countSnap = await getDocs(
+                    collection(db, 'artifacts',
+                        appId, 'users')
+                );
+                setUsersTotalCount(countSnap.size);
+            }
+        } catch (e) {
+            console.error('Failed to fetch users:', e);
+            toast.error('Failed to load users.');
+        }
+        setUsersLoading(false);
+        setIsLoadingUsers(false);
+    };
+
     useEffect(() => {
-        setIsLoadingUsers(true);
-        const q = query(collection(db, 'artifacts', appId, 'users'));
-        const unsub = onSnapshot(q, (snap) => {
-            setUsersList(snap.docs.map(d => ({ id: d.id, ...d.data() })));
-            setIsLoadingUsers(false);
-        }, (error) => {
-            console.error("Users sync error:", error);
-            toast.error("Failed to sync users");
-            setIsLoadingUsers(false);
-        });
-        return () => unsub();
-    }, [user]);
+        if (activeTab !== 'users') return;
+        fetchUsersPage('first');
+    }, [activeTab]);
 
     // Fetch proofs (complaints) - REMOVE the tab guard
     useEffect(() => {
@@ -763,6 +847,81 @@ export const AdminDashboard = ({ user, userData, onLogout, onSwitchToUser, confi
                     toast.success("User access revoked.");
                 } catch {
                     toast.error("Failed to revoke access");
+                }
+            }
+        });
+    };
+
+    const demoteAdmin = (userId, userEmail) => {
+        setConfirmModal({
+            isOpen: true,
+            title: 'Remove Admin Access?',
+            message: 'This will remove admin privileges from this user. They will continue to have normal faculty access to the app.',
+            isDestructive: true,
+            onConfirm: async () => {
+                setConfirmModal(prev => ({
+                    ...prev, isOpen: false
+                }));
+                try {
+                    await updateDoc(
+                        doc(db, 'artifacts', appId,
+                            'users', userId),
+                        {
+                            role: 'faculty',
+                            adminApproved: false,
+                            adminRequested: false,
+                            updatedAt: serverTimestamp()
+                        }
+                    );
+                    setSuccessModal({
+                        isOpen: true,
+                        title: 'Admin Access Removed!',
+                        message: 'Admin privileges removed. User still has faculty access to the app.'
+                    });
+                    toast.success(
+                        'Admin access removed.'
+                    );
+                } catch {
+                    toast.error(
+                        'Failed to remove admin access.'
+                    );
+                }
+            }
+        });
+    };
+
+    const restoreAdmin = (userId) => {
+        setConfirmModal({
+            isOpen: true,
+            title: 'Restore Admin Access?',
+            message: 'This will grant admin privileges back to this user.',
+            isDestructive: false,
+            onConfirm: async () => {
+                setConfirmModal(prev => ({
+                    ...prev, isOpen: false
+                }));
+                try {
+                    await updateDoc(
+                        doc(db, 'artifacts', appId,
+                            'users', userId),
+                        {
+                            role: 'admin',
+                            adminApproved: true,
+                            updatedAt: serverTimestamp()
+                        }
+                    );
+                    setSuccessModal({
+                        isOpen: true,
+                        title: 'Admin Access Restored!',
+                        message: 'Admin privileges have been restored.'
+                    });
+                    toast.success(
+                        'Admin access restored.'
+                    );
+                } catch {
+                    toast.error(
+                        'Failed to restore admin.'
+                    );
                 }
             }
         });
@@ -4062,126 +4221,181 @@ export const AdminDashboard = ({ user, userData, onLogout, onSwitchToUser, confi
                                                         {u.approved ? 'Active' : 'Pending'}
                                                     </Badge>
                                                 </td>
-                                                <td className="p-5 text-right w-1 min-w-[120px]">
-                                                    {u.role === 'revoked' ? (
-                                                        <button
-                                                            onClick={(e) => {
-                                                                e.stopPropagation();
-                                                                approveUser(u.id, u);
-                                                            }}
-                                                            className="text-xs py-2 px-4 rounded-xl bg-amber-500/10 text-amber-600 border border-amber-500/30 hover:bg-amber-500 hover:text-white sm:opacity-0 group-hover:opacity-100 transition-all focus:opacity-100 outline-none font-bold"
-                                                        >
-                                                            Restore Access
-                                                        </button>
-                                                    ) : !u.approved ? (
-                                                        <button
-                                                            onClick={(e) => {
-                                                                e.stopPropagation();
-                                                                approveUser(u.id, u);
-                                                            }}
-                                                            className="text-xs py-2 px-4 rounded-xl bg-success/10 text-success border border-success/30 hover:bg-success hover:text-white sm:opacity-0 group-hover:opacity-100 transition-all focus:opacity-100 outline-none font-bold"
-                                                        >
-                                                            Approve
-                                                        </button>
-                                                    ) : u.role === 'admin' && (
-                                                        <button
-                                                            onClick={(e) => {
-                                                                e.stopPropagation();
-                                                                revokeUser(u.id, u.role);
-                                                            }}
-                                                            className="text-xs py-2 px-4 rounded-xl bg-error/10 text-error border border-error/30 hover:bg-error hover:text-white sm:opacity-0 group-hover:opacity-100 transition-all focus:opacity-100 outline-none font-bold"
-                                                        >
-                                                            Revoke
-                                                        </button>
-                                                    )}
+                                                <td className="p-5 text-right w-1 min-w-[160px]">
+                                                    <div className="flex flex-col gap-1.5
+                                                        items-end">
+                                                        {u.role === 'revoked' ? (
+                                                            <button
+                                                                onClick={(e) => {
+                                                                    e.stopPropagation();
+                                                                    approveUser(u.id, u);
+                                                                }}
+                                                                className="text-xs py-1.5 px-3
+                                                                    rounded-xl bg-emerald-500/10
+                                                                    text-emerald-600 border
+                                                                    border-emerald-500/30
+                                                                    hover:bg-emerald-500
+                                                                    hover:text-white
+                                                                    sm:opacity-0
+                                                                    group-hover:opacity-100
+                                                                    transition-all font-bold"
+                                                            >
+                                                                Restore Access
+                                                            </button>
+                                                        ) : u.role === 'admin' ? (
+                                                            <>
+                                                                <button
+                                                                    onClick={(e) => {
+                                                                        e.stopPropagation();
+                                                                        demoteAdmin(u.id, u.email);
+                                                                    }}
+                                                                    className="text-xs py-1.5 px-3
+                                                                        rounded-xl bg-amber-500/10
+                                                                        text-amber-600 border
+                                                                        border-amber-500/30
+                                                                        hover:bg-amber-500
+                                                                        hover:text-white
+                                                                        sm:opacity-0
+                                                                        group-hover:opacity-100
+                                                                        transition-all font-bold"
+                                                                >
+                                                                    Remove Admin
+                                                                </button>
+                                                                <button
+                                                                    onClick={(e) => {
+                                                                        e.stopPropagation();
+                                                                        revokeUser(u.id, u.role);
+                                                                    }}
+                                                                    className="text-xs py-1.5 px-3
+                                                                        rounded-xl bg-error/10
+                                                                        text-error border
+                                                                        border-error/30
+                                                                        hover:bg-error
+                                                                        hover:text-white
+                                                                        sm:opacity-0
+                                                                        group-hover:opacity-100
+                                                                        transition-all font-bold"
+                                                                >
+                                                                    Revoke All
+                                                                </button>
+                                                            </>
+                                                        ) : u.role === 'faculty' &&
+                                                            u.role !== 'super_admin' ? (
+                                                            <>
+                                                                <button
+                                                                    onClick={(e) => {
+                                                                        e.stopPropagation();
+                                                                        restoreAdmin(u.id);
+                                                                    }}
+                                                                    className="text-xs py-1.5 px-3
+                                                                        rounded-xl bg-blue-500/10
+                                                                        text-blue-600 border
+                                                                        border-blue-500/30
+                                                                        hover:bg-blue-500
+                                                                        hover:text-white
+                                                                        sm:opacity-0
+                                                                        group-hover:opacity-100
+                                                                        transition-all font-bold"
+                                                                >
+                                                                    Make Admin
+                                                                </button>
+                                                                <button
+                                                                    onClick={(e) => {
+                                                                        e.stopPropagation();
+                                                                        revokeUser(u.id, u.role);
+                                                                    }}
+                                                                    className="text-xs py-1.5 px-3
+                                                                        rounded-xl bg-error/10
+                                                                        text-error border
+                                                                        border-error/30
+                                                                        hover:bg-error
+                                                                        hover:text-white
+                                                                        sm:opacity-0
+                                                                        group-hover:opacity-100
+                                                                        transition-all font-bold"
+                                                                >
+                                                                    Revoke
+                                                                </button>
+                                                            </>
+                                                        ) : u.role === 'student' ? (
+                                                            <button
+                                                                onClick={(e) => {
+                                                                    e.stopPropagation();
+                                                                    revokeUser(u.id, u.role);
+                                                                }}
+                                                                className="text-xs py-1.5 px-3
+                                                                    rounded-xl bg-error/10 text-error
+                                                                    border border-error/30
+                                                                    hover:bg-error hover:text-white
+                                                                    sm:opacity-0
+                                                                    group-hover:opacity-100
+                                                                    transition-all font-bold"
+                                                            >
+                                                                Revoke
+                                                            </button>
+                                                        ) : null}
+                                                    </div>
                                                 </td>
                                             </tr>
                                         ))}
                                     </tbody>
                                 </table>
-                                {totalUserPages > 1 && (
-                                    <div className="flex items-center justify-between
-                                        px-5 py-4 border-t border-zinc-100
-                                        dark:border-white/5">
-                                        <p className="text-xs font-bold text-zinc-400">
-                                            Showing {(usersPage - 1) * USERS_PER_PAGE + 1}
-                                            {' – '}
-                                            {Math.min(
-                                                usersPage * USERS_PER_PAGE,
-                                                filteredUsers.length
-                                            )}{' '}
-                                            of {filteredUsers.length} users
-                                        </p>
-                                        <div className="flex items-center gap-2">
-                                            <button
-                                                onClick={() => setUsersPage(p =>
-                                                    Math.max(1, p - 1))}
-                                                disabled={usersPage === 1}
-                                                className="px-4 py-2 rounded-xl text-sm
-                                                    font-bold bg-zinc-100 dark:bg-white/10
-                                                    text-zinc-700 dark:text-white
-                                                    disabled:opacity-40
-                                                    hover:bg-zinc-200
-                                                    dark:hover:bg-white/20
-                                                    transition-colors"
-                                            >
-                                                ← Prev
-                                            </button>
-                                            {Array.from({ length: totalUserPages },
-                                                (_, i) => i + 1)
-                                                .filter(p =>
-                                                    p === 1 ||
-                                                    p === totalUserPages ||
-                                                    Math.abs(p - usersPage) <= 1
-                                                )
-                                                .reduce((acc, p, idx, arr) => {
-                                                    if (idx > 0 &&
-                                                        p - arr[idx - 1] > 1) {
-                                                        acc.push('...');
-                                                    }
-                                                    acc.push(p);
-                                                    return acc;
-                                                }, [])
-                                                .map((p, i) => (
-                                                    p === '...' ? (
-                                                        <span key={`dots-${i}`}
-                                                            className="text-zinc-400
-                                                            text-sm font-bold px-2">
-                                                            ...
-                                                        </span>
-                                                    ) : (
-                                                        <button
-                                                            key={p}
-                                                            onClick={() => setUsersPage(p)}
-                                                            className={`w-9 h-9 rounded-xl
-                                                                text-sm font-bold transition-all
-                                                                ${usersPage === p
-                                                                    ? 'bg-primary text-white shadow-md'
-                                                                    : 'bg-zinc-100 dark:bg-white/10 text-zinc-700 dark:text-white hover:bg-zinc-200 dark:hover:bg-white/20'
-                                                                }`}
-                                                        >
-                                                            {p}
-                                                        </button>
-                                                    )
-                                                ))
-                                            }
-                                            <button
-                                                onClick={() => setUsersPage(p =>
-                                                    Math.min(totalUserPages, p + 1))}
-                                                disabled={usersPage === totalUserPages}
-                                                className="px-4 py-2 rounded-xl text-sm
-                                                    font-bold bg-zinc-100 dark:bg-white/10
-                                                    text-zinc-700 dark:text-white
-                                                    disabled:opacity-40
-                                                    hover:bg-zinc-200
-                                                    dark:hover:bg-white/20
-                                                    transition-colors"
-                                            >
-                                                Next →
-                                            </button>
-                                        </div>
+                                {/* Pagination */}
+                                <div className="flex items-center
+                                    justify-between px-5 py-4 border-t
+                                    border-zinc-100 dark:border-white/5">
+                                    <p className="text-xs font-bold
+                                        text-zinc-400">
+                                        {usersTotalCount > 0
+                                            ? `${usersTotalCount} total users`
+                                            : `${usersList.length} users shown`}
+                                    </p>
+                                    <div className="flex items-center gap-2">
+                                        <button
+                                            onClick={() =>
+                                                fetchUsersPage('prev')}
+                                            disabled={userPageStack.length <= 1
+                                                || usersLoading}
+                                            className="px-4 py-2 rounded-xl
+                                                text-sm font-bold bg-zinc-100
+                                                dark:bg-white/10 text-zinc-700
+                                                dark:text-white disabled:opacity-40
+                                                hover:bg-zinc-200
+                                                dark:hover:bg-white/20
+                                                transition-colors"
+                                        >
+                                            ← Prev
+                                        </button>
+                                        <button
+                                            onClick={() =>
+                                                fetchUsersPage('next')}
+                                            disabled={usersList.length < 30
+                                                || usersLoading}
+                                            className="px-4 py-2 rounded-xl
+                                                text-sm font-bold bg-zinc-100
+                                                dark:bg-white/10 text-zinc-700
+                                                dark:text-white disabled:opacity-40
+                                                hover:bg-zinc-200
+                                                dark:hover:bg-white/20
+                                                transition-colors"
+                                        >
+                                            Next →
+                                        </button>
+                                        <button
+                                            onClick={() =>
+                                                fetchUsersPage('first')}
+                                            disabled={usersLoading}
+                                            className="px-4 py-2 rounded-xl
+                                                text-sm font-bold bg-primary/10
+                                                text-primary hover:bg-primary/20
+                                                transition-colors text-xs"
+                                        >
+                                            <RefreshCw size={12}
+                                                className="inline mr-1" />
+                                            Refresh
+                                        </button>
                                     </div>
-                                )}
+                                </div>
                                 {filteredUsers.length === 0 && (
                                     <div className="text-center py-16">
                                         <Users size={48} className="mx-auto text-zinc-600 mb-4 opacity-50" />

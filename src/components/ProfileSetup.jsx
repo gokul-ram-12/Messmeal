@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { User } from 'lucide-react';
 import { toast } from 'react-hot-toast';
 import { Button } from './ui/Button';
@@ -17,6 +17,20 @@ export const ProfileSetupScreen = ({ user, userData, onComplete, theme = 'orange
     const [studyingYear, setStudyingYear] = useState(userData?.studyingYear || '1');
     const [registrationId, setRegistrationId] = useState(userData?.registrationId || '');
     const [registrationIdError, setRegistrationIdError] = useState('');
+
+    useEffect(() => {
+        if (config?.hostels?.length > 0 &&
+            !userData?.hostel) {
+            setHostel(config.hostels[0]);
+        }
+    }, [config?.hostels]);
+
+    useEffect(() => {
+        if (config?.messTypes?.length > 0 &&
+            !userData?.messType) {
+            setMessType(config.messTypes[0]);
+        }
+    }, [config?.messTypes]);
 
     const handleSubmit = async () => {
         if (!name.trim()) {

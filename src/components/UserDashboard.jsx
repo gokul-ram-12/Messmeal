@@ -117,6 +117,14 @@ export const UserDashboard = ({ user, userData, onLogout, onSwitchToAdmin, canSw
     const [successModal, setSuccessModal] = useState({ isOpen: false, title: '', message: '' });
     const [showChecklist, setShowChecklist] = useState(false);
     const isFirstNoticeLoad = React.useRef(true);
+    const [dismissedNotices, setDismissedNotices] =
+        useState(() => {
+            try {
+                const key = `dismissed_notices_${user?.uid || 'guest'}`;
+                const stored = localStorage.getItem(key);
+                return stored ? JSON.parse(stored) : [];
+            } catch { return []; }
+        });
 
     // Notification preferences (persisted in localStorage per user)
     const notifStorageKey = user?.uid ? `notifPrefs_${user.uid}` : null;
@@ -169,6 +177,47 @@ export const UserDashboard = ({ user, userData, onLogout, onSwitchToAdmin, canSw
         return result;
     }, [config, selectedDate]);
 
+    const profileCompletion = useMemo(() => {
+        if (!userData) return { percent: 0, missing: [] };
+        const fields = [
+            {
+                key: 'name',
+                label: 'Full Name',
+                done: !!userData.name?.trim()
+            },
+            {
+                key: 'hostel',
+                label: 'Hostel',
+                done: !!userData.hostel
+            },
+            {
+                key: 'messType',
+                label: 'Mess Type',
+                done: !!userData.messType
+            },
+            {
+                key: 'registrationId',
+                label: userData.role === 'faculty'
+                    ? 'Employee ID'
+                    : 'Registration Number',
+                done: !!userData.registrationId?.trim()
+            },
+            {
+                key: 'avatar',
+                label: 'Avatar',
+                done: !!userData.avatar
+            }
+        ];
+        const done = fields.filter(f => f.done).length;
+        const percent = Math.round(
+            (done / fields.length) * 100
+        );
+        const missing = fields
+            .filter(f => !f.done)
+            .map(f => f.label);
+        return { percent, missing };
+    }, [userData]);
+
     useEffect(() => {
         if (!user?.uid) return;
         const key = `messmeal_tour_${user.uid}`;
@@ -182,6 +231,13 @@ export const UserDashboard = ({ user, userData, onLogout, onSwitchToAdmin, canSw
         );
         setShowTour(false);
         setTourStep(0);
+    };
+
+    const dismissNotice = (noticeId) => {
+        const key = `dismissed_notices_${user?.uid || 'guest'}`;
+        const updated = [...dismissedNotices, noticeId];
+        setDismissedNotices(updated);
+        localStorage.setItem(key, JSON.stringify(updated));
     };
 
     useEffect(() => {
@@ -817,26 +873,81 @@ Keep the health tip short, practical and encouraging.`;
 
                 {activeTab === 'menu' && (
                     <div className="space-y-8">
-                        {isLoadingNotices ? (
-                            <div className="space-y-4 animate-pulse">
-                                {[1, 2].map(i => (
-                                    <div key={i} className="bg-white dark:bg-[#1A1A1A] border-l-4 border-zinc-200 p-4 rounded-xl shadow-sm h-24" />
+                        {/* Notice Board */}
+                        {notices.filter(n =>
+                            !dismissedNotices.includes(n.id)
+                        ).length > 0 && (
+                            <div className="space-y-2 mb-4">
+                                {notices
+                                    .filter(n =>
+                                        !dismissedNotices.includes(n.id)
+                                    )
+                                    .map(notice => (
+                                    <div key={notice.id}
+                                        className="bg-warning/5
+                                        border-l-4 border-warning
+                                        rounded-2xl p-4 relative
+                                        overflow-hidden shadow-sm">
+                                        <div className="flex
+                                            items-start gap-3 pr-8">
+                                            <div className="bg-warning/20
+                                                p-2 rounded-xl
+                                                flex-shrink-0">
+                                                <Megaphone
+                                                    className="text-warning"
+                                                    size={16} />
+                                            </div>
+                                            <div className="flex-1
+                                                min-w-0">
+                                                <h4 className="font-heading
+                                                    font-black text-dark
+                                                    dark:text-white text-sm
+                                                    tracking-tight mb-1">
+                                                    {notice.title}
+                                                </h4>
+                                                <p className="text-xs
+                                                    text-zinc-600
+                                                    dark:text-zinc-300
+                                                    leading-relaxed">
+                                                    {notice.message}
+                                                </p>
+                                                {notice.expiresAt && (
+                                                    <p className="text-[10px]
+                                                        font-bold
+                                                        text-amber-500
+                                                        mt-1 uppercase
+                                                        tracking-widest">
+                                                        Expires:{' '}
+                                                        {new Date(
+                                                            notice.expiresAt
+                                                            + 'T00:00:00'
+                                                        ).toLocaleDateString(
+                                                            [], {
+                                                            day: 'numeric',
+                                                            month: 'short'
+                                                        })}
+                                                    </p>
+                                                )}
+                                            </div>
+                                        </div>
+                                        <button
+                                            onClick={() =>
+                                                dismissNotice(notice.id)}
+                                            className="absolute top-3
+                                                right-3 p-1.5 rounded-lg
+                                                text-zinc-400
+                                                hover:text-zinc-600
+                                                dark:hover:text-white
+                                                hover:bg-black/5
+                                                dark:hover:bg-white/10
+                                                transition-colors"
+                                            title="Dismiss"
+                                        >
+                                            <X size={14} />
+                                        </button>
+                                    </div>
                                 ))}
                             </div>
-                        ) : (
-                            notices.length > 0 && notices.map(notice => (
-                                <div key={notice.id} className="bg-warning/5 border-l-4 border-warning p-4 rounded-card dark:rounded-card-xl relative overflow-hidden shadow-card dark:shadow-card-dark">
-                                    <div className="flex items-start gap-3">
-                                        <div className="bg-warning/20 p-2.5 rounded-xl flex-shrink-0">
-                                            <Megaphone className="text-warning" size={20} />
-                                        </div>
-                                        <div>
-                                            <h4 className="font-heading font-black text-[#0D0D0D] dark:text-white text-base tracking-tight mb-1">{notice.title}</h4>
-                                            <p className="text-sm text-[#6B6B6B] dark:text-[#A0A0A0] leading-relaxed max-w-2xl">{notice.message}</p>
-                                        </div>
-                                    </div>
-                                </div>
-                            ))
                         )}
 
                         <div className="flex justify-end mb-4">
@@ -1220,6 +1331,109 @@ Keep the health tip short, practical and encouraging.`;
 
                 {activeTab === 'profile' && (
                     <div className="w-full max-w-4xl mx-auto space-y-6 animate-fade-in mt-4 pb-24">
+                        {/* Profile Completion Card */}
+                        <div className={`p-5 rounded-2xl border-2
+                            mb-6 transition-all
+                            ${profileCompletion.percent === 100
+                                ? 'bg-emerald-50 dark:bg-emerald-900/20 border-emerald-200 dark:border-emerald-500/30'
+                                : 'bg-primary/5 border-primary/20'
+                            }`}>
+                            <div className="flex items-center gap-4">
+                                {/* Circular progress */}
+                                <div className="relative w-16 h-16
+                                    flex-shrink-0">
+                                    <svg className="w-16 h-16
+                                        -rotate-90" viewBox="0 0 64 64">
+                                        <circle
+                                            cx="32" cy="32" r="28"
+                                            fill="none"
+                                            stroke="currentColor"
+                                            strokeWidth="6"
+                                            className="text-zinc-200
+                                                dark:text-white/10"
+                                        />
+                                        <circle
+                                            cx="32" cy="32" r="28"
+                                            fill="none"
+                                            strokeWidth="6"
+                                            strokeLinecap="round"
+                                            stroke={
+                                                profileCompletion.percent === 100
+                                                ? '#10b981'
+                                                : 'var(--color-primary,#0057FF)'
+                                            }
+                                            strokeDasharray={
+                                                `${2 * Math.PI * 28}`
+                                            }
+                                            strokeDashoffset={
+                                                `${2 * Math.PI * 28 *
+                                                (1 - profileCompletion.percent / 100)}`
+                                            }
+                                            style={{
+                                                transition:
+                                                    'stroke-dashoffset 0.5s ease'
+                                            }}
+                                        />
+                                    </svg>
+                                    <div className="absolute inset-0
+                                        flex items-center justify-center">
+                                        <span className={`text-sm
+                                            font-black
+                                            ${profileCompletion.percent === 100
+                                                ? 'text-emerald-600'
+                                                : 'text-primary'
+                                            }`}>
+                                            {profileCompletion.percent}%
+                                        </span>
+                                    </div>
+                                </div>
+
+                                <div className="flex-1 min-w-0">
+                                    {profileCompletion.percent === 100 ? (
+                                        <>
+                                            <p className="font-heading
+                                                font-black text-emerald-700
+                                                dark:text-emerald-400
+                                                tracking-tight">
+                                                Profile Complete! ✓
+                                            </p>
+                                            <p className="text-xs
+                                                text-emerald-600/70
+                                                dark:text-emerald-400/70
+                                                font-medium mt-0.5">
+                                                All details are filled in.
+                                            </p>
+                                        </>
+                                    ) : (
+                                        <>
+                                            <p className="font-heading
+                                                font-black text-dark
+                                                dark:text-white
+                                                tracking-tight">
+                                                Complete Your Profile
+                                            </p>
+                                            <p className="text-xs
+                                                text-zinc-500 font-medium
+                                                mt-0.5">
+                                                Missing:{' '}
+                                                {profileCompletion.missing.join(', ')}
+                                            </p>
+                                            <button
+                                                onClick={() =>
+                                                    setShowProfileEdit(true)}
+                                                className="mt-2 text-xs
+                                                    font-black text-primary
+                                                    uppercase tracking-widest
+                                                    hover:underline"
+                                            >
+                                                Complete Now →
+                                            </button>
+                                        </>
+                                    )}
+                                </div>
+                            </div>
+                        </div>
+
                         <Card>
                             <div className="flex items-center justify-center flex-col text-center mb-8">
                                 <div className="w-24 h-24 rounded-full p-1 border-2 border-primary/50 relative mb-4 shadow-sm">
@@ -1237,10 +1451,30 @@ Keep the health tip short, practical and encouraging.`;
                                     <span className="text-sm font-bold text-mid uppercase tracking-widest">Hostel</span>
                                     <span className="text-sm font-semibold text-dark dark:text-white">{userData?.hostel}</span>
                                 </div>
+                                {userData?.hostel &&
+                                    config?.hostels &&
+                                    !config.hostels.includes(userData.hostel) && (
+                                    <p className="text-[11px] text-amber-500
+                                        font-bold mt-1">
+                                        ⚠ Your hostel ({userData.hostel}) is no
+                                        longer in the system. Please update
+                                        your profile.
+                                    </p>
+                                )}
                                 <div className="flex justify-between p-4 bg-white dark:bg-slate-800 border border-black/5 dark:border-white/5 rounded-2xl shadow-sm">
                                     <span className="text-sm font-bold text-mid uppercase tracking-widest">Mess Type</span>
                                     <span className="text-sm font-semibold text-dark dark:text-white">{userData?.messType}</span>
                                 </div>
+                                {userData?.messType &&
+                                    config?.messTypes &&
+                                    !config.messTypes.includes(userData.messType) && (
+                                    <p className="text-[11px] text-amber-500
+                                        font-bold mt-1">
+                                        ⚠ Your mess type ({userData.messType})
+                                        is no longer in the system. Please
+                                        update your profile.
+                                    </p>
+                                )}
                                 {userData?.role === 'student' && userData?.studyingYear && (
                                     <div className="flex justify-between p-4 bg-white dark:bg-slate-800 border border-black/5 dark:border-white/5 rounded-2xl shadow-sm">
                                         <span className="text-sm font-bold text-mid uppercase tracking-widest">Studying Year</span>
