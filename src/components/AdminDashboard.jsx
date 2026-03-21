@@ -279,9 +279,9 @@ export const AdminDashboard = ({ user, userData, onLogout, onSwitchToUser, confi
     const [reportFilter, setReportFilter] = useState('all');
     const [selectedImage, setSelectedImage] = useState(null);
 
-  const [usersCurrentPage, setUsersCurrentPage] =
-      useState(1);
-  const USERS_PER_PAGE = 30;
+    const [usersCurrentPage, setUsersCurrentPage] =
+        useState(1);
+    const USERS_PER_PAGE = 30;
 
     // Proof filters state
     const [proofDateFilter, setProofDateFilter] = useState('');
@@ -415,35 +415,35 @@ export const AdminDashboard = ({ user, userData, onLogout, onSwitchToUser, confi
         return () => clearInterval(timer);
     }, []);
 
-  const fetchAllUsers = async () => {
-      setIsLoadingUsers(true);
-      try {
-          const snap = await getDocs(
-              collection(db, 'artifacts',
-                  appId, 'users')
-          );
-          const list = snap.docs.map(d => ({
-              id: d.id, ...d.data()
-          }));
-          setUsersList(list);
-          setUsersCurrentPage(1);
-      } catch (e) {
-          console.error(
-              'Failed to fetch users:', e
-          );
-          toast.error('Failed to load users.');
-      }
-      setIsLoadingUsers(false);
-  };
+    const fetchAllUsers = async () => {
+        setIsLoadingUsers(true);
+        try {
+            const snap = await getDocs(
+                collection(db, 'artifacts',
+                    appId, 'users')
+            );
+            const list = snap.docs.map(d => ({
+                id: d.id, ...d.data()
+            }));
+            setUsersList(list);
+            setUsersCurrentPage(1);
+        } catch (e) {
+            console.error(
+                'Failed to fetch users:', e
+            );
+            toast.error('Failed to load users.');
+        }
+        setIsLoadingUsers(false);
+    };
 
-  useEffect(() => {
-      if (activeTab !== 'users') return;
-      fetchAllUsers();
-  }, [activeTab]);
+    useEffect(() => {
+        if (activeTab !== 'users') return;
+        fetchAllUsers();
+    }, [activeTab]);
 
-  useEffect(() => {
-      setUsersCurrentPage(1);
-  }, [userFilter, searchQuery]);
+    useEffect(() => {
+        setUsersCurrentPage(1);
+    }, [userFilter, searchQuery]);
 
     // Fetch proofs (complaints) - REMOVE the tab guard
     useEffect(() => {
@@ -1821,45 +1821,46 @@ export const AdminDashboard = ({ user, userData, onLogout, onSwitchToUser, confi
         toast.success('QR Code downloaded!');
     };
 
-  const filteredUsers = usersList
-      .filter(u => {
-          if (userFilter === 'revoked')
-              return u.role === 'revoked';
-          if (userFilter === 'students')
-              return u.role === 'student';
-          if (userFilter === 'faculty')
-              return u.role === 'faculty';
-          if (userFilter === 'admins')
-              return u.role === 'admin' ||
-                  u.role === 'super_admin';
-          return true;
-      })
-      .filter(u => {
-          if (!searchQuery.trim()) return true;
-          const q = searchQuery
-              .trim().toLowerCase();
-          return (
-              (u.name || '').toLowerCase()
-                  .includes(q) ||
-              (u.email || '').toLowerCase()
-                  .includes(q) ||
-              (u.registrationId || '').toLowerCase()
-                  .includes(q) ||
-              (u.hostel || '').toLowerCase()
-                  .includes(q)
-          );
-      })
-      .sort((a, b) =>
-          (a.name || '').localeCompare(b.name || '')
-      );
+    const filteredUsers = usersList
+        .filter(u => {
+            if (userFilter === 'revoked')
+                return u.role === 'revoked';
+            if (userFilter === 'students')
+                return u.role === 'student';
+            if (userFilter === 'faculty')
+                return u.role === 'faculty';
+            if (userFilter === 'admins')
+                return u.role === 'admin' ||
+                    u.role === 'super_admin';
+            return true;
+        })
+        .filter(u => {
+            if (!searchQuery.trim()) return true;
+            const q = searchQuery
+                .trim().toLowerCase();
+            return (
+                (u.name || '').toLowerCase()
+                    .includes(q) ||
+                (u.email || '').toLowerCase()
+                    .includes(q) ||
+                (u.registrationId || '')
+                    .toLowerCase().includes(q) ||
+                (u.hostel || '').toLowerCase()
+                    .includes(q)
+            );
+        })
+        .sort((a, b) =>
+            (a.name || '')
+                .localeCompare(b.name || '')
+        );
 
-  const totalUserPages = Math.ceil(
-      filteredUsers.length / USERS_PER_PAGE
-  );
-  const paginatedUsers = filteredUsers.slice(
-      (usersCurrentPage - 1) * USERS_PER_PAGE,
-      usersCurrentPage * USERS_PER_PAGE
-  );
+    const totalUserPages = Math.ceil(
+        filteredUsers.length / USERS_PER_PAGE
+    );
+    const paginatedUsers = filteredUsers.slice(
+        (usersCurrentPage - 1) * USERS_PER_PAGE,
+        usersCurrentPage * USERS_PER_PAGE
+    );
 
     const navItems = [
         { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
