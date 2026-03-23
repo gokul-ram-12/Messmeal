@@ -795,7 +795,7 @@ export const CommitteeChecklist = ({ user, userData }) => {
                                         placeholder={
                                             `Overall remarks for ${meal}...`}
                                         rows={3}
-                                        className={`w-full p-3
+                                        className={`w-full p-3 min-h-[80px]
                                             text-sm bg-zinc-50
                                             dark:bg-black/20 border
                                             border-zinc-200

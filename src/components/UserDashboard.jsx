@@ -801,12 +801,14 @@ Keep the health tip short, practical and encouraging.`;
                             onError={(e) => { e.target.src = '/pwa-512x512.png'; }}
                         />
                         <div>
-                            <h1 className="text-xl tracking-tight text-[#0D0D0D] dark:text-white leading-none">
-                                <span className="font-brand-mess font-bold text-[#0057FF] dark:text-white">Mess</span>
-                                <span className="font-brand-meal text-[#0057FF] dark:text-[#D4F000]">Meal</span>
-                            </h1>
-                            <p className="inline-block text-[7px] font-black uppercase tracking-[0.15em] text-[#0057FF] bg-[#0057FF]/10 px-1.5 py-0.4 rounded -mt-0.5 opacity-100 leading-none">eat on time be on time</p>
-                            <p className="text-[10px] text-[#6B6B6B] dark:text-[#A0A0A0] font-medium">{userData?.hostel} · {userData?.messType}</p>
+                            <div className="min-w-0">
+                                <h1 className="text-xl tracking-tight text-[#0D0D0D] dark:text-white leading-none">
+                                    <span className="font-brand-mess font-bold text-[#0057FF] dark:text-white">Mess</span>
+                                    <span className="font-brand-meal text-[#0057FF] dark:text-[#D4F000]">Meal</span>
+                                </h1>
+                                <p className="inline-block text-[7px] font-black uppercase tracking-[0.15em] text-[#0057FF] bg-[#0057FF]/10 px-1.5 py-0.4 rounded -mt-0.5 opacity-100 leading-none">eat on time be on time</p>
+                                <p className="text-[10px] text-[#6B6B6B] dark:text-[#A0A0A0] font-medium hidden xs:block sm:block truncate max-w-[120px] sm:max-w-none">{userData?.hostel} · {userData?.messType}</p>
+                            </div>
                         </div>
                     </div>
                     <div className="flex items-center gap-2">
@@ -831,7 +833,7 @@ Keep the health tip short, practical and encouraging.`;
                             </button>
 
                             {showNotifPanel && (
-                                <div className="fixed right-2 left-2 sm:absolute sm:left-auto sm:right-0 sm:w-80 top-16 sm:top-full sm:mt-2 bg-white dark:bg-[#1A1A2E] rounded-2xl shadow-2xl border border-zinc-200 dark:border-white/10 z-50 overflow-hidden">
+                                <div className="fixed right-2 left-2 sm:absolute sm:left-auto sm:right-0 sm:w-80 top-16 sm:top-full sm:mt-2 bg-white dark:bg-[#1A1A2E] rounded-2xl shadow-2xl border border-zinc-200 dark:border-white/10 z-[60] overflow-hidden">
                                     {/* Header */}
                                     <div className="flex items-center justify-between px-4 py-3 border-b border-zinc-100 dark:border-white/5">
                                         <h3 className="font-heading font-black text-sm text-dark dark:text-white">Notifications</h3>
@@ -925,7 +927,10 @@ Keep the health tip short, practical and encouraging.`;
                 </div>
             </header>
 
-            <main className="max-w-7xl mx-auto p-4 pb-32">
+            <main className="max-w-7xl mx-auto p-4"
+                style={{
+                    paddingBottom: 'max(8rem, calc(8rem + env(safe-area-inset-bottom, 0px)))'
+                }}>
                 {showChecklist ? (
                     <div className="animate-fade-in">
                         <button
@@ -1035,17 +1040,18 @@ Keep the health tip short, practical and encouraging.`;
                                     )
                                     .map(notice => (
                                     <div key={notice.id}
-                                        className="bg-warning/5
-                                        border-l-4 border-warning
+                                        className="bg-amber-50 dark:bg-amber-500/15
+                                        border-l-4 border-amber-400
+                                        dark:border-amber-400
                                         rounded-2xl p-4 relative
                                         overflow-hidden shadow-sm">
                                         <div className="flex
                                             items-start gap-3 pr-8">
-                                            <div className="bg-warning/20
-                                                p-2 rounded-xl
-                                                flex-shrink-0">
+                                            <div className="bg-amber-100 dark:bg-amber-500/20
+                                                p-2 rounded-xl flex-shrink-0">
                                                 <Megaphone
-                                                    className="text-warning"
+                                                    className="text-amber-600
+                                                    dark:text-amber-400"
                                                     size={16} />
                                             </div>
                                             <div className="flex-1
@@ -1505,7 +1511,7 @@ Keep the health tip short, practical and encouraging.`;
                             mb-6 transition-all
                             ${profileCompletion.percent === 100
                                 ? 'bg-emerald-50 dark:bg-emerald-900/20 border-emerald-200 dark:border-emerald-500/30'
-                                : 'bg-primary/5 border-primary/20'
+                                : 'bg-blue-50 dark:bg-[#16162A] border-blue-200 dark:border-white/10'
                             }`}>
                             <div className="flex items-center gap-4">
                                 {/* Circular progress */}
@@ -1965,7 +1971,11 @@ Keep the health tip short, practical and encouraging.`;
                 )}
             </main>
 
-            <nav className="fixed bottom-5 left-1/2 -translate-x-1/2 bg-white dark:bg-[#0D0D0D] border border-[#E4E4E4] dark:border-[#2A2A2A] p-1.5 rounded-pill flex justify-between gap-1 shadow-card-md dark:shadow-card-dark z-50 w-[96%] max-w-sm">
+            <nav className="fixed bottom-4 left-1/2 -translate-x-1/2 bg-white dark:bg-[#0D0D0D] border border-[#E4E4E4] dark:border-[#2A2A2A] p-1.5 rounded-pill flex justify-between gap-1 shadow-card-md dark:shadow-card-dark z-50 w-[92%] max-w-sm"
+                style={{
+                    paddingBottom: 'env(safe-area-inset-bottom, 0px)',
+                    bottom: 'max(16px, env(safe-area-inset-bottom, 16px))'
+                }}>
                 {[
                     { id: 'menu', icon: Utensils, label: 'Menu' },
                     { id: 'feedback', icon: Star, label: 'Rate' },
@@ -2063,16 +2073,16 @@ Keep the health tip short, practical and encouraging.`;
             {showTour && (
                 <div className="fixed inset-0 z-[300] bg-black/80 backdrop-blur-sm flex items-end justify-center p-4">
                     <div className="w-full max-w-md bg-white dark:bg-[#1A1A2E] rounded-[2rem] overflow-hidden shadow-2xl">
-                        <div className={`bg-gradient-to-br ${TOUR_SLIDES[tourStep].color} p-8 text-center`}>
-                            <div className="text-6xl mb-4">
+                        <div className={`bg-gradient-to-br ${TOUR_SLIDES[tourStep].color} p-5 sm:p-8 text-center`}>
+                            <div className="text-4xl sm:text-6xl mb-2 sm:mb-4">
                                 {TOUR_SLIDES[tourStep].emoji}
                             </div>
-                            <h2 className="text-2xl font-heading font-black text-white tracking-tight">
+                            <h2 className="text-xl sm:text-2xl font-heading font-black text-white tracking-tight">
                                 {TOUR_SLIDES[tourStep].title}
                             </h2>
                         </div>
-                        <div className="p-6">
-                            <p className="text-zinc-600 dark:text-zinc-300 text-base font-medium leading-relaxed text-center mb-6">
+                        <div className="p-4 sm:p-6">
+                            <p className="text-zinc-600 dark:text-zinc-300 text-base font-medium leading-relaxed text-center mb-4 sm:mb-6">
                                 {TOUR_SLIDES[tourStep].description}
                             </p>
                             <div className="flex justify-center gap-2 mb-6">
