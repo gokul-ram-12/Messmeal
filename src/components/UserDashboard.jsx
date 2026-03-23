@@ -1126,6 +1126,24 @@ Keep the health tip short, practical and encouraging.`;
 
                         {viewType === 'daily' ? (
                             <>
+                                {userData?.hostel &&
+                                    config?.hostels?.length > 0 &&
+                                    !config.hostels.includes(userData.hostel) && (
+                                    <div className="w-full bg-amber-500/10 border border-amber-500/30 rounded-2xl p-4 flex items-center justify-between gap-4 mb-4">
+                                        <div className="flex items-center gap-3">
+                                            <AlertTriangle size={18} className="text-amber-500 flex-shrink-0" />
+                                            <p className="text-sm font-bold text-amber-700 dark:text-amber-400">
+                                                Your hostel ({userData.hostel}) was removed. Please update your profile to see the menu.
+                                            </p>
+                                        </div>
+                                        <button
+                                            onClick={() => setShowProfileEdit(true)}
+                                            className="text-xs font-black text-amber-600 dark:text-amber-400 uppercase tracking-widest bg-amber-500/20 px-3 py-1.5 rounded-xl hover:bg-amber-500/30 transition-colors flex-shrink-0"
+                                        >
+                                            Update →
+                                        </button>
+                                    </div>
+                                )}
                                 <DateStrip selectedDate={selectedDate} onSelectDate={setSelectedDate} theme={theme} />
                                 <MenuGrid
                                     menu={menu}
@@ -1200,14 +1218,14 @@ Keep the health tip short, practical and encouraging.`;
 
                                                         if (currentMinutes < startMinutes) {
                                                             return (
-                                                                <span className="bg-white/20 text-white text-[10px] font-black px-3 py-1.5 rounded-full uppercase tracking-wider">
+                                                                <span className="bg-black/10 dark:bg-black/20 text-white dark:text-[#0D0D0D] text-[10px] font-black px-3 py-1.5 rounded-full uppercase tracking-wider">
                                                                     OPENS {timing.start}
                                                                 </span>
                                                             );
                                                         }
                                                         return (
-                                                            <span className="bg-white/30 text-white text-[10px] font-black px-3 py-1.5 rounded-full uppercase tracking-wider flex items-center gap-1">
-                                                                <span className="w-1.5 h-1.5 rounded-full bg-white animate-pulse inline-block" />
+                                                            <span className="bg-black/10 dark:bg-black/20 text-white dark:text-[#0D0D0D] text-[10px] font-black px-3 py-1.5 rounded-full uppercase tracking-wider flex items-center gap-1">
+                                                                <span className="w-1.5 h-1.5 rounded-full bg-white dark:bg-[#0D0D0D] animate-pulse inline-block" />
                                                                 ONGOING
                                                             </span>
                                                         );

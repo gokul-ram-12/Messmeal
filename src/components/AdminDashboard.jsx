@@ -356,6 +356,30 @@ export const AdminDashboard = ({ user, userData, onLogout, onSwitchToUser, confi
             if (config.mealTimings) setEditTimings(config.mealTimings);
             if (config.foodLimits) setEditFoodLimits(config.foodLimits);
             if (config.tagline) setNewTagline(config.tagline);
+            if (config.hostels?.length > 0) {
+                setMenuHostel(prev =>
+                    config.hostels.includes(prev)
+                        ? prev
+                        : config.hostels[0]
+                );
+                setUploadHostel(prev =>
+                    config.hostels.includes(prev)
+                        ? prev
+                        : config.hostels[0]
+                );
+            }
+            if (config.messTypes?.length > 0) {
+                setMenuType(prev =>
+                    config.messTypes.includes(prev)
+                        ? prev
+                        : config.messTypes[0]
+                );
+                setUploadMessType(prev =>
+                    config.messTypes.includes(prev)
+                        ? prev
+                        : config.messTypes[0]
+                );
+            }
         }
     }, [config]);
 
