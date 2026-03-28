@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { signInWithPopup, GoogleAuthProvider, signOut, onAuthStateChanged } from 'firebase/auth';
 import { doc, getDoc, setDoc, updateDoc, onSnapshot } from 'firebase/firestore';
-import { auth, db, appId, messaging } from './lib/firebase';
+import { auth, db, appId, getMessagingInstance } from './lib/firebase';
 import { getToken } from 'firebase/messaging';
 import { INITIAL_SUPER_ADMIN_EMAIL, SUPER_ADMIN_EMAILS, WHITELISTED_EMAILS } from './lib/constants';
 import { Toaster, toast } from 'react-hot-toast';
@@ -206,12 +206,15 @@ const App = () => {
 
   // Request FCM Token
   useEffect(() => {
-    if (user && userData && messaging && !userData.fcmToken) {
+    if (user && userData && !userData.fcmToken) {
       const requestPermission = async () => {
         try {
+          const messagingInstance = getMessagingInstance();
+          if (!messagingInstance) return; // Messaging not available
+          
           const permission = await Notification.requestPermission();
           if (permission === 'granted') {
-            const token = await getToken(messaging);
+            const token = await getToken(messagingInstance);
             if (token) {
               await setDoc(doc(db, 'artifacts', appId, 'users', user.uid), { fcmToken: token }, { merge: true });
             }

@@ -37,9 +37,19 @@ export const db = dbInstance;
 export const appId = 'messmeal-default';
 
 // Initialize Messaging conditionally (not supported in all browsers)
-export let messaging = null;
-isSupported().then((supported) => {
+// Keep messaging internal - don't export to avoid initialization issues
+let messagingInstance = null;
+
+(async () => {
+  try {
+    const supported = await isSupported();
     if (supported) {
-        messaging = getMessaging(app);
+      messagingInstance = getMessaging(app);
     }
-});
+  } catch (err) {
+    console.warn('Messaging not supported:', err);
+  }
+})();
+
+// Safe exports
+export const getMessagingInstance = () => messagingInstance;
