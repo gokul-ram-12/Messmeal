@@ -1111,15 +1111,7 @@ export const AdminDashboard = ({ user, userData, onLogout, onSwitchToUser, confi
             setShowMiniAdminModal(false);
             setMiniAdminTargetUser(null);
             setMiniAdminHostels([]);
-            setSuccessModal({
-                isOpen: true,
-                title: 'Mini Admin Assigned!',
-                message: `User granted Mini Admin
-                    access for hostels:
-                    ${miniAdminHostels.join(', ')}`
-            });
             toast.success('Mini Admin assigned!');
-            fetchAllUsers();
         } catch {
             toast.error(
                 'Failed to assign Mini Admin.'
@@ -2080,6 +2072,7 @@ export const AdminDashboard = ({ user, userData, onLogout, onSwitchToUser, confi
         } catch (e) {
             console.error("Admin profile update failed:", e);
             toast.error("Failed to update profile. Please try again.");
+            setShowBouncingLogo(false);
         }
     };
 
