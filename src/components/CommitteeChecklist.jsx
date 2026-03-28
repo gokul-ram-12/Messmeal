@@ -1204,12 +1204,7 @@ export const CommitteeChecklist = ({ user, userData, config }) => {
                                         tracking-widest transition-all
                                         ${historyTab === 'attendance'
                                             ? 'bg-primary text-white'
-                                            : 'bg-zinc-100
-                                                dark:bg-white/10
-                                                text-zinc-600
-                                                dark:text-zinc-400
-                                                hover:bg-zinc-200
-                                                dark:hover:bg-white/20'
+                                            : 'bg-zinc-100 dark:bg-white/10 text-zinc-600 dark:text-zinc-400 hover:bg-zinc-200 dark:hover:bg-white/20'
                                         }`}
                                 >
                                     Attendance
@@ -1223,12 +1218,7 @@ export const CommitteeChecklist = ({ user, userData, config }) => {
                                         tracking-widest transition-all
                                         ${historyTab === 'remarks'
                                             ? 'bg-primary text-white'
-                                            : 'bg-zinc-100
-                                                dark:bg-white/10
-                                                text-zinc-600
-                                                dark:text-zinc-400
-                                                hover:bg-zinc-200
-                                                dark:hover:bg-white/20'
+                                            : 'bg-zinc-100 dark:bg-white/10 text-zinc-600 dark:text-zinc-400 hover:bg-zinc-200 dark:hover:bg-white/20'
                                         }`}
                                 >
                                     Remarks
@@ -1325,11 +1315,7 @@ export const CommitteeChecklist = ({ user, userData, config }) => {
                                                             font-mono
                                                             text-zinc-600
                                                             dark:text-zinc-400">
-                                                            {new Date(
-                                                                record
-                                                                    .date
-                                                            ).loc
-                                                                aleString()}
+                                                            {new Date(record.date).toLocaleString()}
                                                         </td>
                                                         <td className="px-4
                                                             py-3 text-xs
@@ -1346,22 +1332,7 @@ export const CommitteeChecklist = ({ user, userData, config }) => {
                                                                     <td className="px-4
                                                                         py-3">
                                                                         <span
-                                                                            className={`px-3
-                                                                                py-1
-                                                                                rounded-full
-                                                                                text-xs
-                                                                                font-black
-                                                                                ${record.status ===
-                                                                                    '✓'
-                                                                                    ? 'bg-emerald-100
-                                                                                        dark:bg-emerald-500/20
-                                                                                        text-emerald-600
-                                                                                        dark:text-emerald-300'
-                                                                                    : 'bg-red-100
-                                                                                        dark:bg-red-500/20
-                                                                                        text-red-600
-                                                                                        dark:text-red-300'
-                                                                                }`}
+                                                                            className={`px-3 py-1 rounded-full text-xs font-black ${record.status === '✓' ? 'bg-emerald-100 dark:bg-emerald-500/20 text-emerald-600 dark:text-emerald-300' : 'bg-red-100 dark:bg-red-500/20 text-red-600 dark:text-red-300'}`}
                                                                         >
                                                                             {record
                                                                                 .status
