@@ -1,13 +1,14 @@
 import React, { useState, useEffect } from 'react';
 import { db, appId } from '../lib/firebase';
 import {
-    doc, onSnapshot, setDoc, updateDoc, serverTimestamp
+    doc, onSnapshot, setDoc, updateDoc, serverTimestamp, getDocs, collection
 } from 'firebase/firestore';
 import { COMMITTEE_CHECKLISTS, COMMITTEE_ROLES } from
     '../lib/constants';
 import { CheckCircle2, XCircle, Clock, Save, Clock4,
-    ClipboardList, AlertTriangle, MessageSquare } from 'lucide-react';
+    ClipboardList, AlertTriangle, MessageSquare, FileText, X, Download } from 'lucide-react';
 import { toast } from 'react-hot-toast';
+import * as XLSX from 'xlsx';
 import { Button } from './ui/Button';
 import { Card } from './ui/Card';
 
@@ -32,6 +33,27 @@ export const CommitteeChecklist = ({ user, userData, config }) => {
     const [monthlyData, setMonthlyData] = useState({});
     const [monthlySubmitted, setMonthlySubmitted] =
         useState(false);
+
+    // History state
+    const [showHistory, setShowHistory] =
+        useState(false);
+    const [historyData, setHistoryData] =
+        useState([]);
+    const [historyLoading, setHistoryLoading] =
+        useState(false);
+    const [historyTab, setHistoryTab] =
+        useState('attendance');
+    const [historyDateFrom, setHistoryDateFrom] =
+        useState(() => {
+            const d = new Date();
+            return `${d.getFullYear()}-${
+                String(d.getMonth() + 1)
+                .padStart(2, '0')}-01`;
+        });
+    const [historyDateTo, setHistoryDateTo] =
+        useState(
+            new Date().toLocaleDateString('en-CA')
+        );
 
     const dailyDocId =
         `${committeeRole}_${hostel}_${todayStr}`;
@@ -372,6 +394,159 @@ export const CommitteeChecklist = ({ user, userData, config }) => {
         setSaving(false);
     };
 
+    const fetchHistory = async () => {
+        setHistoryLoading(true);
+        try {
+            const snap = await getDocs(
+                collection(db, 'artifacts', appId,
+                    'public', 'data', 'checklists')
+            );
+            const docs = snap.docs
+                .map(d => ({
+                    id: d.id, ...d.data()
+                }))
+                .filter(d =>
+                    d.committeeRole === committeeRole
+                    && d.hostel === hostel
+                    && d.submitted === true
+                    && d.date >= historyDateFrom
+                    && d.date <= historyDateTo
+                )
+                .sort((a, b) =>
+                    a.date.localeCompare(b.date)
+                );
+            setHistoryData(docs);
+        } catch (e) {
+            console.error('History fetch failed:', e);
+            toast.error('Failed to load history.');
+        }
+        setHistoryLoading(false);
+    };
+
+    useEffect(() => {
+        if (showHistory) fetchHistory();
+    }, [showHistory, historyDateFrom,
+        historyDateTo]);
+
+    const exportHistoryCSV = () => {
+        if (historyData.length === 0) {
+            toast.error('No data to export.');
+            return;
+        }
+
+        const items = checklist?.daily
+            || checklist?.monthly || [];
+        const dates = historyData
+            .map(d => d.date);
+        const meals = checklist?.daily
+            ? ['Breakfast', 'Lunch', 'Dinner']
+            : ['Monthly'];
+
+        // Sheet 1 — Attendance
+        const attendanceRows = items.map(item => {
+            const row = {
+                'Item ID': item.id,
+                'Item': item.text
+            };
+            dates.forEach(date => {
+                const doc = historyData
+                    .find(d => d.date === date);
+                meals.forEach(meal => {
+                    const entry =
+                        meal === 'Monthly'
+                        ? doc?.items?.[item.id]
+                        : doc?.items?.[item.id]
+                            ?.[meal];
+                    const key = meals.length > 1
+                        ? `${date} (${meal.slice(0,1)})`
+                        : date;
+                    row[key] =
+                        entry?.status || '-';
+                });
+            });
+            return row;
+        });
+
+        // Sheet 2 — Remarks
+        const remarksRows = items.map(item => {
+            const row = {
+                'Item ID': item.id,
+                'Item': item.text
+            };
+            dates.forEach(date => {
+                const doc = historyData
+                    .find(d => d.date === date);
+                meals.forEach(meal => {
+                    const entry =
+                        meal === 'Monthly'
+                        ? doc?.items?.[item.id]
+                        : doc?.items?.[item.id]
+                            ?.[meal];
+                    const key = meals.length > 1
+                        ? `${date} (${meal.slice(0,1)})`
+                        : date;
+                    row[key] =
+                        entry?.remarks || '-';
+                });
+            });
+            return row;
+        });
+
+        // Session remarks rows (if exist)
+        const sessionRows = [];
+        dates.forEach(date => {
+            const doc = historyData
+                .find(d => d.date === date);
+            if (doc?.sessionRemarks) {
+                meals.forEach(meal => {
+                    const remark =
+                        doc.sessionRemarks[meal];
+                    if (remark) {
+                        sessionRows.push({
+                            'Date': date,
+                            'Meal': meal,
+                            'Overall Remark': remark
+                        });
+                    }
+                });
+            }
+        });
+
+        const wb = XLSX.utils.book_new();
+
+        const ws1 = XLSX.utils.json_to_sheet(
+            attendanceRows
+        );
+        XLSX.utils.book_append_sheet(
+            wb, ws1, 'Attendance'
+        );
+
+        const ws2 = XLSX.utils.json_to_sheet(
+            remarksRows
+        );
+        XLSX.utils.book_append_sheet(
+            wb, ws2, 'Remarks'
+        );
+
+        if (sessionRows.length > 0) {
+            const ws3 = XLSX.utils.json_to_sheet(
+                sessionRows
+            );
+            XLSX.utils.book_append_sheet(
+                wb, ws3, 'Session Remarks'
+            );
+        }
+
+        const filename =
+            `${COMMITTEE_ROLES[committeeRole]}_` +
+            `${hostel}_` +
+            `${historyDateFrom}_to_` +
+            `${historyDateTo}.xlsx`;
+
+        XLSX.writeFile(wb, filename);
+        toast.success('Exported successfully!');
+    };
+
     if (!committeeRole || !checklist) {
         return (
             <div className="p-8 text-center text-zinc-400">
@@ -391,6 +566,20 @@ export const CommitteeChecklist = ({ user, userData, config }) => {
 
     return (
         <div className="space-y-8 pb-24">
+
+            {/* View History Button */}
+            <button
+                onClick={() => setShowHistory(true)}
+                className="mb-4 flex items-center gap-2
+                    text-xs font-black text-primary
+                    uppercase tracking-widest
+                    bg-primary/10 px-4 py-2 rounded-xl
+                    hover:bg-primary/20 transition-colors
+                    self-start"
+            >
+                <FileText size={14} />
+                View History
+            </button>
 
             {/* Auto-lock Countdown Banner */}
             {(() => {
@@ -882,6 +1071,341 @@ export const CommitteeChecklist = ({ user, userData, config }) => {
                         </Button>
                     )}
                 </Card>
+            )}
+
+            {/* History Panel Overlay */}
+            {showHistory && (
+                <div className="fixed inset-0 bg-black/50
+                    backdrop-blur-sm z-[100] overflow-y-auto">
+                    <div className="min-h-screen flex items-center
+                        justify-center p-4">
+                        <Card className="w-full max-w-5xl bg-white
+                            dark:bg-[#16162A] border border-zinc-200
+                            dark:border-white/10">
+                            {/* Header */}
+                            <div className="flex items-center justify-between
+                                mb-6 pb-4 border-b border-zinc-100
+                                dark:border-white/5">
+                                <div>
+                                    <h3 className="text-lg font-black
+                                        text-dark dark:text-white
+                                        uppercase tracking-widest">
+                                        Checklist History
+                                    </h3>
+                                    <p className="text-xs text-zinc-500
+                                        mt-1">
+                                        {user?.email} •{' '}
+                                        {hostel}
+                                    </p>
+                                </div>
+                                <div className="flex gap-2">
+                                    {historyData.length > 0 && (
+                                        <button
+                                            onClick={exportHistoryCSV}
+                                            disabled={historyLoading}
+                                            className="flex items-center gap-2
+                                                px-4 py-2 rounded-xl
+                                                text-xs font-black
+                                                bg-emerald-500/10
+                                                text-emerald-600
+                                                dark:text-emerald-400
+                                                hover:bg-emerald-500/20
+                                                transition-colors
+                                                disabled:opacity-50"
+                                        >
+                                            <Download size={14} />
+                                            Export CSV
+                                        </button>
+                                    )}
+                                    <button
+                                        onClick={() => setShowHistory(false)}
+                                        className="flex items-center gap-2
+                                            px-4 py-2 rounded-xl
+                                            text-xs font-black
+                                            bg-zinc-100
+                                            dark:bg-white/10
+                                            text-zinc-600
+                                            dark:text-zinc-400
+                                            hover:bg-zinc-200
+                                            dark:hover:bg-white/20
+                                            transition-colors"
+                                    >
+                                        <X size={14} />
+                                        Close
+                                    </button>
+                                </div>
+                            </div>
+
+                            {/* Date Filters */}
+                            <div className="grid grid-cols-1
+                                sm:grid-cols-2 gap-4 mb-6 pb-6
+                                border-b border-zinc-100
+                                dark:border-white/5">
+                                <div>
+                                    <label className="block text-xs
+                                        font-black text-zinc-500
+                                        uppercase tracking-widest mb-2">
+                                        From Date
+                                    </label>
+                                    <input
+                                        type="date"
+                                        value={historyDateFrom}
+                                        onChange={(e) =>
+                                            setHistoryDateFrom(
+                                                e.target.value
+                                            )
+                                        }
+                                        className="w-full p-2 text-sm
+                                            bg-white dark:bg-black/40
+                                            border border-zinc-200
+                                            dark:border-white/10
+                                            rounded-xl outline-none
+                                            focus:border-primary
+                                            focus:ring-2
+                                            focus:ring-primary/20
+                                            text-dark dark:text-white"
+                                    />
+                                </div>
+                                <div>
+                                    <label className="block text-xs
+                                        font-black text-zinc-500
+                                        uppercase tracking-widest mb-2">
+                                        To Date
+                                    </label>
+                                    <input
+                                        type="date"
+                                        value={historyDateTo}
+                                        onChange={(e) =>
+                                            setHistoryDateTo(
+                                                e.target.value
+                                            )
+                                        }
+                                        className="w-full p-2 text-sm
+                                            bg-white dark:bg-black/40
+                                            border border-zinc-200
+                                            dark:border-white/10
+                                            rounded-xl outline-none
+                                            focus:border-primary
+                                            focus:ring-2
+                                            focus:ring-primary/20
+                                            text-dark dark:text-white"
+                                    />
+                                </div>
+                            </div>
+
+                            {/* Tab Switcher */}
+                            <div className="flex gap-2 mb-6">
+                                <button
+                                    onClick={() =>
+                                        setHistoryTab('attendance')
+                                    }
+                                    className={`px-4 py-2 rounded-xl
+                                        text-xs font-black uppercase
+                                        tracking-widest transition-all
+                                        ${historyTab === 'attendance'
+                                            ? 'bg-primary text-white'
+                                            : 'bg-zinc-100
+                                                dark:bg-white/10
+                                                text-zinc-600
+                                                dark:text-zinc-400
+                                                hover:bg-zinc-200
+                                                dark:hover:bg-white/20'
+                                        }`}
+                                >
+                                    Attendance
+                                </button>
+                                <button
+                                    onClick={() =>
+                                        setHistoryTab('remarks')
+                                    }
+                                    className={`px-4 py-2 rounded-xl
+                                        text-xs font-black uppercase
+                                        tracking-widest transition-all
+                                        ${historyTab === 'remarks'
+                                            ? 'bg-primary text-white'
+                                            : 'bg-zinc-100
+                                                dark:bg-white/10
+                                                text-zinc-600
+                                                dark:text-zinc-400
+                                                hover:bg-zinc-200
+                                                dark:hover:bg-white/20'
+                                        }`}
+                                >
+                                    Remarks
+                                </button>
+                            </div>
+
+                            {/* Data Grid Table */}
+                            <div className="overflow-x-auto">
+                                {historyLoading ? (
+                                    <div className="py-8 text-center">
+                                        <p className="text-zinc-500">
+                                            Loading history...
+                                        </p>
+                                    </div>
+                                ) : historyData.length === 0 ? (
+                                    <div className="py-8 text-center">
+                                        <p className="text-zinc-500">
+                                            No submissions found for
+                                            selected date range
+                                        </p>
+                                    </div>
+                                ) : (
+                                    <table className="w-full text-sm">
+                                        <thead>
+                                            <tr className="border-b
+                                                border-zinc-200
+                                                dark:border-white/10">
+                                                <th className="text-left
+                                                    px-4 py-3 font-black
+                                                    text-xs uppercase
+                                                    tracking-widest
+                                                    text-zinc-600
+                                                    dark:text-zinc-400">
+                                                    Date
+                                                </th>
+                                                <th className="text-left
+                                                    px-4 py-3 font-black
+                                                    text-xs uppercase
+                                                    tracking-widest
+                                                    text-zinc-600
+                                                    dark:text-zinc-400">
+                                                    Meal / Item
+                                                </th>
+                                                {historyTab ===
+                                                    'attendance' ? (
+                                                    <>
+                                                        <th className="text-left
+                                                            px-4 py-3
+                                                            font-black
+                                                            text-xs uppercase
+                                                            tracking-widest
+                                                            text-zinc-600
+                                                            dark:text-zinc-400">
+                                                            Status
+                                                        </th>
+                                                        <th className="text-left
+                                                            px-4 py-3
+                                                            font-black
+                                                            text-xs uppercase
+                                                            tracking-widest
+                                                            text-zinc-600
+                                                            dark:text-zinc-400">
+                                                            Remarks
+                                                        </th>
+                                                    </>
+                                                ) : (
+                                                    <th className="text-left
+                                                        px-4 py-3
+                                                        font-black
+                                                        text-xs uppercase
+                                                        tracking-widest
+                                                        text-zinc-600
+                                                        dark:text-zinc-400">
+                                                        Session Remarks
+                                                    </th>
+                                                )}
+                                            </tr>
+                                        </thead>
+                                        <tbody>
+                                            {historyData.map(
+                                                (
+                                                    record,
+                                                    idx
+                                                ) => (
+                                                    <tr key={idx}
+                                                        className="border-b
+                                                            border-zinc-100
+                                                            dark:border-white/5
+                                                            hover:bg-zinc-50
+                                                            dark:hover:bg-white/5
+                                                            transition-colors">
+                                                        <td className="px-4
+                                                            py-3 text-xs
+                                                            font-mono
+                                                            text-zinc-600
+                                                            dark:text-zinc-400">
+                                                            {new Date(
+                                                                record
+                                                                    .date
+                                                            ).loc
+                                                                aleString()}
+                                                        </td>
+                                                        <td className="px-4
+                                                            py-3 text-xs
+                                                            font-medium
+                                                            text-dark
+                                                            dark:text-white">
+                                                            {record
+                                                                .mealOrItem}
+                                                        </td>
+                                                        {historyTab ===
+                                                            'attendance'
+                                                            ? (
+                                                                <>
+                                                                    <td className="px-4
+                                                                        py-3">
+                                                                        <span
+                                                                            className={`px-3
+                                                                                py-1
+                                                                                rounded-full
+                                                                                text-xs
+                                                                                font-black
+                                                                                ${record.status ===
+                                                                                    '✓'
+                                                                                    ? 'bg-emerald-100
+                                                                                        dark:bg-emerald-500/20
+                                                                                        text-emerald-600
+                                                                                        dark:text-emerald-300'
+                                                                                    : 'bg-red-100
+                                                                                        dark:bg-red-500/20
+                                                                                        text-red-600
+                                                                                        dark:text-red-300'
+                                                                                }`}
+                                                                        >
+                                                                            {record
+                                                                                .status
+                                                                                === '✓'
+                                                                                ? 'Completed'
+                                                                                : 'Not Completed'}
+                                                                        </span>
+                                                                    </td>
+                                                                    <td className="px-4
+                                                                        py-3
+                                                                        text-xs
+                                                                        text-zinc-600
+                                                                        dark:text-zinc-400
+                                                                        max-w-xs
+                                                                        truncate">
+                                                                        {record
+                                                                            .remarks
+                                                                            ||
+                                                                            '-'}
+                                                                    </td>
+                                                                </>
+                                                            ) : (
+                                                                <td className="px-4
+                                                                    py-3 text-xs
+                                                                    text-zinc-600
+                                                                    dark:text-zinc-400
+                                                                    max-w-xs
+                                                                    truncate">
+                                                                    {record
+                                                                        .sessionRemarks
+                                                                        ||
+                                                                        '-'}
+                                                                </td>
+                                                            )}
+                                                    </tr>
+                                                )
+                                            )}
+                                        </tbody>
+                                    </table>
+                                )}
+                            </div>
+                        </Card>
+                    </div>
+                </div>
             )}
         </div>
     );
