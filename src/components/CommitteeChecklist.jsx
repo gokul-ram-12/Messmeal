@@ -1361,10 +1361,16 @@ export const CommitteeChecklist = ({ user, userData, config }) => {
                                                                     dark:text-zinc-400
                                                                     max-w-xs
                                                                     truncate">
-                                                                    {record
-                                                                        .sessionRemarks
-                                                                        ||
-                                                                        '-'}
+                                                                    {typeof record
+                                                                        .sessionRemarks ===
+                                                                        'object'
+                                                                        ? Object.values(record
+                                                                            .sessionRemarks)
+                                                                            .filter(Boolean)
+                                                                            .join(' | ')
+                                                                        : (record
+                                                                            .sessionRemarks
+                                                                            || '-')}
                                                                 </td>
                                                             )}
                                                     </tr>
