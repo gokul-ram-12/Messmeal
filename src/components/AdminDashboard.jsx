@@ -86,6 +86,15 @@ export const AdminDashboard = ({ user, userData, onLogout, onSwitchToUser, confi
     const [isLoadingChecklists, setIsLoadingChecklists] = useState(false);
     const [missingChecklists, setMissingChecklists] = useState([]);
 
+    // Derived values (must be before useMemo to avoid TDZ errors)
+    const isMiniAdmin = userData?.role === 'mini_admin';
+    const assignedHostels = userData?.assignedHostels || [];
+
+    const isHostelAllowed = (hostel) => {
+        if (!isMiniAdmin) return true;
+        return assignedHostels.includes(hostel);
+    };
+
     const averageRatings = useMemo(() => {
         const mealRatings = { Breakfast: [], Lunch: [], Snacks: [], Dinner: [] };
         feedbacks.filter(f =>
@@ -448,17 +457,6 @@ export const AdminDashboard = ({ user, userData, onLogout, onSwitchToUser, confi
     const isSuperAdmin = userData?.role === 'super_admin' ||
         SUPER_ADMIN_EMAILS.map(e => e.toLowerCase()).includes(user?.email?.toLowerCase()) ||
         user?.email === config?.superAdminEmail;
-
-    const isMiniAdmin =
-        userData?.role === 'mini_admin';
-
-    const assignedHostels =
-        userData?.assignedHostels || [];
-
-    const isHostelAllowed = (hostel) => {
-        if (!isMiniAdmin) return true;
-        return assignedHostels.includes(hostel);
-    };
 
     // Live Clock Effect
     useEffect(() => {
