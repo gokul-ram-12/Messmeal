@@ -67,6 +67,9 @@ export const AdminDashboard = ({ user, userData, onLogout, onSwitchToUser, confi
     const [qrCodeUrl, setQrCodeUrl] = useState('');
     const [showQrModal, setShowQrModal] = useState(false);
     const [qrLoading, setQrLoading] = useState(false);
+    const [showMiniAdminModal, setShowMiniAdminModal] = useState(false);
+    const [miniAdminTargetUser, setMiniAdminTargetUser] = useState(null);
+    const [miniAdminHostels, setMiniAdminHostels] = useState([]);
 
     // Data states
     const [usersList, setUsersList] = useState([]);
@@ -432,6 +435,12 @@ export const AdminDashboard = ({ user, userData, onLogout, onSwitchToUser, confi
     const isSuperAdmin = userData?.role === 'super_admin' ||
         SUPER_ADMIN_EMAILS.map(e => e.toLowerCase()).includes(user?.email?.toLowerCase()) ||
         user?.email === config?.superAdminEmail;
+
+    const isMiniAdmin =
+        userData?.role === 'mini_admin';
+
+    const assignedHostels =
+        userData?.assignedHostels || [];
 
     // Live Clock Effect
     useEffect(() => {
@@ -1029,6 +1038,88 @@ export const AdminDashboard = ({ user, userData, onLogout, onSwitchToUser, confi
                 } catch {
                     toast.error(
                         'Failed to restore admin.'
+                    );
+                }
+            }
+        });
+    };
+
+    const saveMiniAdmin = async () => {
+        if (!miniAdminTargetUser) return;
+        if (miniAdminHostels.length === 0) {
+            toast.error(
+                'Select at least 1 hostel.'
+            );
+            return;
+        }
+        if (miniAdminHostels.length > 2) {
+            toast.error(
+                'Maximum 2 hostels allowed ' +
+                'for Mini Admin.'
+            );
+            return;
+        }
+        try {
+            await updateDoc(
+                doc(db, 'artifacts', appId,
+                    'users', miniAdminTargetUser.id),
+                {
+                    role: 'mini_admin',
+                    approved: true,
+                    adminApproved: true,
+                    assignedHostels: miniAdminHostels,
+                    updatedAt: serverTimestamp()
+                }
+            );
+            setShowMiniAdminModal(false);
+            setMiniAdminTargetUser(null);
+            setMiniAdminHostels([]);
+            setSuccessModal({
+                isOpen: true,
+                title: 'Mini Admin Assigned!',
+                message: `User granted Mini Admin
+                    access for hostels:
+                    ${miniAdminHostels.join(', ')}`
+            });
+            toast.success('Mini Admin assigned!');
+            fetchAllUsers();
+        } catch {
+            toast.error(
+                'Failed to assign Mini Admin.'
+            );
+        }
+    };
+
+    const removeMiniAdmin = (userId) => {
+        setConfirmModal({
+            isOpen: true,
+            title: 'Remove Mini Admin Access?',
+            message: 'This will remove Mini Admin ' +
+                'privileges. User will revert to ' +
+                'faculty access.',
+            isDestructive: true,
+            onConfirm: async () => {
+                setConfirmModal(prev => ({
+                    ...prev, isOpen: false
+                }));
+                try {
+                    await updateDoc(
+                        doc(db, 'artifacts', appId,
+                            'users', userId),
+                        {
+                            role: 'faculty',
+                            adminApproved: false,
+                            assignedHostels: [],
+                            updatedAt: serverTimestamp()
+                        }
+                    );
+                    toast.success(
+                        'Mini Admin access removed.'
+                    );
+                    fetchAllUsers();
+                } catch {
+                    toast.error(
+                        'Failed to remove Mini Admin.'
                     );
                 }
             }
@@ -1855,7 +1946,8 @@ export const AdminDashboard = ({ user, userData, onLogout, onSwitchToUser, confi
                 return u.role === 'faculty';
             if (userFilter === 'admins')
                 return u.role === 'admin' ||
-                    u.role === 'super_admin';
+                    u.role === 'super_admin' ||
+                    u.role === 'mini_admin';
             return true;
         })
         .filter(u => {
@@ -4817,6 +4909,77 @@ export const AdminDashboard = ({ user, userData, onLogout, onSwitchToUser, confi
                                                                 <button
                                                                     onClick={(e) => {
                                                                         e.stopPropagation();
+                                                                        setMiniAdminTargetUser(u);
+                                                                        setMiniAdminHostels(
+                                                                            u.assignedHostels || []
+                                                                        );
+                                                                        setShowMiniAdminModal(true);
+                                                                    }}
+                                                                    className="text-xs py-1.5 px-3
+                                                                        rounded-xl bg-purple-500/10
+                                                                        text-purple-600 border
+                                                                        border-purple-500/30
+                                                                        hover:bg-purple-500
+                                                                        hover:text-white
+                                                                        transition-all font-bold"
+                                                                >
+                                                                    Mini Admin
+                                                                </button>
+                                                                <button
+                                                                    onClick={(e) => {
+                                                                        e.stopPropagation();
+                                                                        revokeUser(u.id, u.role);
+                                                                    }}
+                                                                    className="text-xs py-1.5 px-3
+                                                                        rounded-xl bg-error/10
+                                                                        text-error border
+                                                                        border-error/30
+                                                                        hover:bg-error
+                                                                        hover:text-white
+                                                                        transition-all font-bold"
+                                                                >
+                                                                    Revoke
+                                                                </button>
+                                                            </>
+                                                        ) : u.role === 'mini_admin' ? (
+                                                            <>
+                                                                <button
+                                                                    onClick={(e) => {
+                                                                        e.stopPropagation();
+                                                                        setMiniAdminTargetUser(u);
+                                                                        setMiniAdminHostels(
+                                                                            u.assignedHostels || []
+                                                                        );
+                                                                        setShowMiniAdminModal(true);
+                                                                    }}
+                                                                    className="text-xs py-1.5 px-3
+                                                                        rounded-xl bg-purple-500/10
+                                                                        text-purple-600 border
+                                                                        border-purple-500/30
+                                                                        hover:bg-purple-500
+                                                                        hover:text-white
+                                                                        transition-all font-bold"
+                                                                >
+                                                                    Edit Hostels
+                                                                </button>
+                                                                <button
+                                                                    onClick={(e) => {
+                                                                        e.stopPropagation();
+                                                                        removeMiniAdmin(u.id);
+                                                                    }}
+                                                                    className="text-xs py-1.5 px-3
+                                                                        rounded-xl bg-amber-500/10
+                                                                        text-amber-600 border
+                                                                        border-amber-500/30
+                                                                        hover:bg-amber-500
+                                                                        hover:text-white
+                                                                        transition-all font-bold"
+                                                                >
+                                                                    Remove Mini Admin
+                                                                </button>
+                                                                <button
+                                                                    onClick={(e) => {
+                                                                        e.stopPropagation();
                                                                         revokeUser(u.id, u.role);
                                                                     }}
                                                                     className="text-xs py-1.5 px-3
@@ -5916,8 +6079,26 @@ export const AdminDashboard = ({ user, userData, onLogout, onSwitchToUser, confi
                             className="p-2 bg-[#F7F7F7] dark:bg-[#1E1E35] border border-[#EEEEEE] dark:border-[#1E1E2E] rounded-lg text-[#6B6B6B] dark:text-[#8B8BAD] hover:text-[#2E7D32] dark:hover:text-[#7C3AED] transition-colors">
                             <RefreshCw size={15} />
                         </button>
-                        <Badge variant={isSuperAdmin ? 'super_admin' : 'admin'}>
-                            {isSuperAdmin ? <><Crown size={11} className="mr-1 inline" /> SUPER ADMIN</> : 'ADMIN'}
+                        <Badge variant={isSuperAdmin
+                            ? 'super_admin'
+                            : isMiniAdmin ? 'warning' : 'admin'}>
+                            {isSuperAdmin
+                                ? <><Crown size={11}
+                                    className="mr-1 inline" />
+                                    SUPER ADMIN</>
+                                : isMiniAdmin
+                                ? <>
+                                    <Shield size={11}
+                                        className="mr-1 inline" />
+                                    MINI ADMIN
+                                    {assignedHostels.length > 0 && (
+                                        <span className="ml-1
+                                            opacity-70 text-[9px]">
+                                            {assignedHostels.join(', ')}
+                                        </span>
+                                    )}
+                                  </>
+                                : 'ADMIN'}
                         </Badge>
                     </div>
                 </header>
@@ -5977,6 +6158,112 @@ export const AdminDashboard = ({ user, userData, onLogout, onSwitchToUser, confi
                 {...successModal}
                 onConfirm={() => setSuccessModal(prev => ({ ...prev, isOpen: false }))}
             />
+
+            {showMiniAdminModal && (
+                <div className="fixed inset-0 z-[200]
+                    bg-black/60 backdrop-blur-sm flex
+                    items-center justify-center p-6">
+                    <div className="bg-white
+                        dark:bg-[#1A1A2E] rounded-3xl
+                        shadow-2xl p-6 w-full max-w-sm
+                        border border-white/10">
+
+                        <h3 className="font-heading
+                            font-black text-lg text-dark
+                            dark:text-white tracking-tight
+                            mb-1">
+                            Assign Mini Admin
+                        </h3>
+                        <p className="text-xs text-zinc-400
+                            font-medium mb-4">
+                            {miniAdminTargetUser?.name
+                                || miniAdminTargetUser?.email}
+                            <br />
+                            Select up to 2 hostels.
+                        </p>
+
+                        <div className="grid grid-cols-2
+                            gap-2 mb-6 max-h-48
+                            overflow-y-auto">
+                            {(config?.hostels ||
+                                DEFAULT_HOSTELS).map(h => (
+                                <button
+                                    key={h}
+                                    onClick={() => {
+                                        setMiniAdminHostels(
+                                            prev => {
+                                            if (prev
+                                                .includes(h)) {
+                                                return prev
+                                                    .filter(
+                                                    x => x !== h
+                                                );
+                                            }
+                                            if (prev.length
+                                                >= 2) {
+                                                toast.error(
+                                                    'Max 2 hostels'
+                                                );
+                                                return prev;
+                                            }
+                                            return [...prev, h];
+                                        });
+                                    }}
+                                    className={`p-3 rounded-xl
+                                        text-sm font-bold
+                                        border-2 transition-all
+                                        ${miniAdminHostels
+                                            .includes(h)
+                                            ? 'bg-purple-500 text-white border-purple-500'
+                                            : 'bg-zinc-50 dark:bg-black/20 text-zinc-700 dark:text-white border-zinc-200 dark:border-white/10 hover:border-purple-500'
+                                        }`}
+                                >
+                                    {h}
+                                </button>
+                            ))}
+                        </div>
+
+                        <p className="text-xs text-zinc-400
+                            mb-4 font-medium">
+                            Selected:{' '}
+                            {miniAdminHostels.length === 0
+                                ? 'None'
+                                : miniAdminHostels.join(', ')}
+                        </p>
+
+                        <div className="flex gap-3">
+                            <Button
+                                onClick={saveMiniAdmin}
+                                className="flex-1 py-3
+                                    font-black uppercase
+                                    tracking-widest
+                                    bg-purple-500
+                                    hover:bg-purple-600
+                                    text-white border-0"
+                            >
+                                Save
+                            </Button>
+                            <Button
+                                onClick={() => {
+                                    setShowMiniAdminModal(
+                                        false
+                                    );
+                                    setMiniAdminTargetUser(
+                                        null
+                                    );
+                                    setMiniAdminHostels([]);
+                                }}
+                                variant="secondary"
+                                className="flex-1 py-3
+                                    font-black uppercase
+                                    tracking-widest"
+                            >
+                                Cancel
+                            </Button>
+                        </div>
+                    </div>
+                </div>
+            )}
 
             {showQrModal && qrCodeUrl && (
                 <div className="fixed inset-0 z-[200]

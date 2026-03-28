@@ -1,5 +1,5 @@
-import React, { useState, useEffect, useRef } from 'react';
-import { getAuth, signInWithPopup, GoogleAuthProvider, signOut, onAuthStateChanged } from 'firebase/auth';
+import React, { useState, useEffect } from 'react';
+import { signInWithPopup, GoogleAuthProvider, signOut, onAuthStateChanged } from 'firebase/auth';
 import { doc, getDoc, setDoc, updateDoc, onSnapshot } from 'firebase/firestore';
 import { auth, db, appId, messaging } from './lib/firebase';
 import { getToken } from 'firebase/messaging';
@@ -15,7 +15,7 @@ import { AdminDashboard } from './components/AdminDashboard';
 import { InstallAppModal } from './components/ui/InstallAppModal';
 import { LoadingScreen } from './components/ui/LoadingScreen';
 import { SplashScreen } from './components/ui/SplashScreen';
-import { motion, AnimatePresence } from 'framer-motion';
+import { AnimatePresence } from 'framer-motion';
 
 class ErrorBoundary extends React.Component {
   constructor(props) {
@@ -144,8 +144,13 @@ const App = () => {
           if (docSnap.exists()) {
             const data = docSnap.data();
             setUserData(data);
-            // If super_admin, set admin view (handles page refresh)
+            // If super_admin or mini_admin, set admin view (handles page refresh)
             if (data.role === 'super_admin') setViewMode('admin');
+            if (data.role === 'mini_admin' &&
+                data.approved === true &&
+                data.adminApproved === true) {
+                setViewMode('admin');
+            }
           } else {
             setUserData(null);
           }
@@ -381,8 +386,10 @@ const App = () => {
     try {
       await setDoc(doc(db, 'artifacts', appId, 'users', user.uid), profileData, { merge: true });
       toast.success("Profile saved!");
-    } catch (e) {
-      toast.error("Failed to save profile.");
+      console.log('Profile saved successfully:', profileData);
+    } catch (error) {
+      console.error('Failed to save profile:', error);
+      toast.error("Failed to save profile: " + (error?.message || 'Unknown error'));
     }
   };
 
@@ -393,7 +400,11 @@ const App = () => {
   // Pre-calculate session variables
   const superAdminEmail = config?.superAdminEmail || INITIAL_SUPER_ADMIN_EMAIL;
   const isSuperAdminUser = userData?.role === 'super_admin' || (user?.email && user?.email.toLowerCase() === superAdminEmail.toLowerCase());
-  const canSwitchToAdmin = isSuperAdminUser || userData?.adminApproved === true;
+  const canSwitchToAdmin =
+      userData?.role === 'admin' ||
+      userData?.role === 'super_admin' ||
+      userData?.role === 'mini_admin' ||
+      userData?.adminApproved === true;
 
   return (
     <div className="h-full flex flex-col overflow-hidden">

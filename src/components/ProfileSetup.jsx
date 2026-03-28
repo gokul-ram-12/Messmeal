@@ -1,14 +1,14 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import { User } from 'lucide-react';
 import { toast } from 'react-hot-toast';
 import { Button } from './ui/Button';
 import { DEFAULT_HOSTELS, DEFAULT_MESS_TYPES } from '../lib/constants';
 
-export const ProfileSetupScreen = ({ user, userData, onComplete, theme = 'orange', config, isReadOnly = false }) => {
+export const ProfileSetupScreen = ({ user, userData, onComplete, config, isReadOnly = false }) => {
     const defaultHostels = config?.hostels || DEFAULT_HOSTELS;
     const defaultMessTypes = config?.messTypes || DEFAULT_MESS_TYPES;
 
-    const [name, setName] = useState(userData?.name || user?.displayName || user?.email?.split('@')[0] || '');
+    const [name] = useState(userData?.name || user?.displayName || user?.email?.split('@')[0] || '');
     const [avatar, setAvatar] = useState(userData?.avatar || 'boy');
     const [hostel, setHostel] = useState(userData?.hostel || (config?.hostels?.length > 0 ? config.hostels[0] : (DEFAULT_HOSTELS[0])));
     const [messType, setMessType] = useState(userData?.messType || (config?.messTypes?.length > 0 ? config.messTypes[0] : (DEFAULT_MESS_TYPES[0])));
@@ -18,36 +18,28 @@ export const ProfileSetupScreen = ({ user, userData, onComplete, theme = 'orange
     const [registrationId, setRegistrationId] = useState(userData?.registrationId || '');
     const [registrationIdError, setRegistrationIdError] = useState('');
 
-    useEffect(() => {
-        if (config?.hostels?.length > 0 &&
-            !userData?.hostel) {
-            setHostel(config.hostels[0]);
-        }
-    }, [config?.hostels]);
-
-    useEffect(() => {
-        if (config?.messTypes?.length > 0 &&
-            !userData?.messType) {
-            setMessType(config.messTypes[0]);
-        }
-    }, [config?.messTypes]);
-
     const handleSubmit = async () => {
         if (!name.trim()) {
             toast.error("Please enter your name");
             return;
         }
         setLoading(true);
-        const payload = {
-            name: name.trim(),
-            hostel: String(hostel).trim().toUpperCase(),
-            messType: String(messType).trim().toUpperCase(),
-            avatar,
-            registrationId: registrationId.trim().toUpperCase(),
-            ...(userData?.role !== 'faculty' && { studyingYear })
-        };
-        await onComplete(payload);
-        setLoading(false);
+        try {
+            const payload = {
+                name: name.trim(),
+                hostel: String(hostel).trim().toUpperCase(),
+                messType: String(messType).trim().toUpperCase(),
+                avatar,
+                registrationId: registrationId.trim().toUpperCase(),
+                ...(userData?.role !== 'faculty' && { studyingYear })
+            };
+            await onComplete(payload);
+        } catch (error) {
+            console.error('Profile submission error:', error);
+            toast.error("Failed to save profile. Please try again.");
+        } finally {
+            setLoading(false);
+        }
     };
 
     return (
