@@ -1,9 +1,8 @@
-import React, { useRef, useMemo, useEffect, useState } from 'react';
+import React, { useRef, useMemo, useEffect } from 'react';
 import { format, subDays, addDays } from 'date-fns';
 
-export const DateStrip = ({ selectedDate, onSelectDate, theme = 'orange', onTabChange }) => {
+export const DateStrip = ({ selectedDate, onSelectDate, theme = 'orange' }) => {
     const scrollRef = useRef(null);
-    const [activeTab, setActiveTab] = useState('menu'); // 'menu' or 'limits'
 
     const dates = useMemo(() => {
         const d = [];
@@ -16,11 +15,6 @@ export const DateStrip = ({ selectedDate, onSelectDate, theme = 'orange', onTabC
 
     const isSameDay = (d1, d2String) => d1.toLocaleDateString('en-CA') === d2String;
 
-    const handleTabChange = (tab) => {
-        setActiveTab(tab);
-        if (onTabChange) onTabChange(tab);
-    };
-
     // Auto-scroll to today
     useEffect(() => {
         const t = setTimeout(() => {
@@ -31,30 +25,6 @@ export const DateStrip = ({ selectedDate, onSelectDate, theme = 'orange', onTabC
 
     return (
         <div className="relative w-full mb-6">
-            {/* Tab Switcher */}
-            <div className="px-4 sm:px-6 mb-4 flex gap-2">
-                <button
-                    onClick={() => handleTabChange('menu')}
-                    className={`flex-1 sm:flex-none px-6 sm:px-8 py-2.5 sm:py-3 rounded-full font-bold text-sm sm:text-base transition-all duration-300 ${
-                        activeTab === 'menu'
-                            ? 'bg-[#0057FF] text-white dark:bg-white dark:text-[#0D0D0D]'
-                            : 'bg-white dark:bg-[#1A1A1A] text-[#0057FF] dark:text-[#D4F000] border-2 border-[#0057FF] dark:border-[#D4F000]'
-                    }`}
-                >
-                    Daily Menu
-                </button>
-                <button
-                    onClick={() => handleTabChange('limits')}
-                    className={`flex-1 sm:flex-none px-6 sm:px-8 py-2.5 sm:py-3 rounded-full font-bold text-sm sm:text-base transition-all duration-300 ${
-                        activeTab === 'limits'
-                            ? 'bg-[#0057FF] text-white dark:bg-white dark:text-[#0D0D0D]'
-                            : 'bg-white dark:bg-[#1A1A1A] text-[#0057FF] dark:text-[#D4F000] border-2 border-[#0057FF] dark:border-[#D4F000]'
-                    }`}
-                >
-                    Food Limits
-                </button>
-            </div>
-
             {/* Date Strip */}
             <div ref={scrollRef} className="flex overflow-x-auto gap-2 sm:gap-3 pb-4 px-4 sm:px-6 snap-x snap-mandatory scrollbar-hide scroll-px-4" style={{ scrollBehavior: 'smooth' }}>
                 {dates.map((date, idx) => {
