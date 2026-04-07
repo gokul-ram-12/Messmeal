@@ -6461,8 +6461,8 @@ export const AdminDashboard = ({ user, userData, onLogout, onSwitchToUser, confi
             )}
 
             {showCommitteeModal && committeeModalUser && (
-                <div className="fixed inset-0 z-[200] bg-black/60 backdrop-blur-sm flex items-center justify-center p-4 sm:p-6">
-                    <div className="bg-white dark:bg-[#1A1A2E] rounded-2xl sm:rounded-3xl shadow-2xl p-4 sm:p-6 w-full max-w-sm border border-white/10 max-h-[90vh] overflow-y-auto">
+                <div className="fixed inset-0 z-[200] bg-black/60 backdrop-blur-sm flex items-end sm:items-center justify-center p-4 sm:p-6">
+                    <div className="bg-white dark:bg-[#1A1A2E] rounded-t-3xl sm:rounded-3xl shadow-2xl p-4 sm:p-6 w-full sm:max-w-sm border border-white/10 max-h-[85vh] sm:max-h-[90vh] overflow-y-auto">
 
                         <h3 className="font-heading font-black text-base sm:text-lg text-dark dark:text-white tracking-tight mb-2">
                             Assign Committee Role
@@ -6473,8 +6473,7 @@ export const AdminDashboard = ({ user, userData, onLogout, onSwitchToUser, confi
                                 || committeeModalUser?.email}
                         </p>
 
-                        <div className="space-y-2 mb-6 max-h-60
-                            overflow-y-auto">
+                        <div className="space-y-2 mb-6">
                             <button
                                 onClick={() => {
                                     assignCommitteeRole(
@@ -6520,7 +6519,7 @@ export const AdminDashboard = ({ user, userData, onLogout, onSwitchToUser, confi
                             )}
                         </div>
 
-                        <div className="flex flex-col sm:flex-row gap-3">
+                        <div className="flex flex-col sm:flex-row gap-3 mt-6 sticky bottom-0 bg-white dark:bg-[#1A1A2E] pt-4">
                             <Button
                                 onClick={() => {
                                     setShowCommitteeModal(false);
