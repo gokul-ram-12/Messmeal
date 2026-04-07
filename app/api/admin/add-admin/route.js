@@ -105,13 +105,17 @@ export async function POST(request) {
 
         const userDoc = snap.docs[0];
         const userId = userDoc.id;
+        const userData = userDoc.data();
 
-        // 6. Update user role to admin
+        // 6. Update user role to admin with locked hostel assignment
         await userDoc.ref.update({
             role: 'admin',
             approved: true,
             adminAddedBy: authUser.uid,
-            adminAddedAt: new Date()
+            adminAddedAt: new Date(),
+            assignedHostels: userData.hostel ? [userData.hostel] : [],
+            hostelLockedAt: new Date(),
+            hostelLockedReason: 'admin_role_assigned'
         });
 
         // 7. Send notification email (non-blocking)

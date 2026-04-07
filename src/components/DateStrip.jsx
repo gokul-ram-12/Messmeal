@@ -1,8 +1,9 @@
-import React, { useRef, useMemo, useEffect } from 'react';
+import React, { useRef, useMemo, useEffect, useState } from 'react';
 import { format, subDays, addDays } from 'date-fns';
 
-export const DateStrip = ({ selectedDate, onSelectDate, theme = 'orange' }) => {
+export const DateStrip = ({ selectedDate, onSelectDate, theme = 'orange', onTabChange }) => {
     const scrollRef = useRef(null);
+    const [activeTab, setActiveTab] = useState('menu'); // 'menu' or 'limits'
 
     const dates = useMemo(() => {
         const d = [];
@@ -15,6 +16,10 @@ export const DateStrip = ({ selectedDate, onSelectDate, theme = 'orange' }) => {
 
     const isSameDay = (d1, d2String) => d1.toLocaleDateString('en-CA') === d2String;
 
+    const handleTabChange = (tab) => {
+        setActiveTab(tab);
+        if (onTabChange) onTabChange(tab);
+    };
 
     // Auto-scroll to today
     useEffect(() => {
@@ -26,7 +31,32 @@ export const DateStrip = ({ selectedDate, onSelectDate, theme = 'orange' }) => {
 
     return (
         <div className="relative w-full mb-6">
-            <div ref={scrollRef} className="flex overflow-x-auto gap-3 pb-4 px-2 snap-x snap-mandatory scrollbar-hide scroll-px-2" style={{ scrollBehavior: 'smooth' }}>
+            {/* Tab Switcher */}
+            <div className="px-4 sm:px-6 mb-4 flex gap-2">
+                <button
+                    onClick={() => handleTabChange('menu')}
+                    className={`flex-1 sm:flex-none px-6 sm:px-8 py-2.5 sm:py-3 rounded-full font-bold text-sm sm:text-base transition-all duration-300 ${
+                        activeTab === 'menu'
+                            ? 'bg-[#0057FF] text-white dark:bg-white dark:text-[#0D0D0D]'
+                            : 'bg-white dark:bg-[#1A1A1A] text-[#0057FF] dark:text-[#D4F000] border-2 border-[#0057FF] dark:border-[#D4F000]'
+                    }`}
+                >
+                    Daily Menu
+                </button>
+                <button
+                    onClick={() => handleTabChange('limits')}
+                    className={`flex-1 sm:flex-none px-6 sm:px-8 py-2.5 sm:py-3 rounded-full font-bold text-sm sm:text-base transition-all duration-300 ${
+                        activeTab === 'limits'
+                            ? 'bg-[#0057FF] text-white dark:bg-white dark:text-[#0D0D0D]'
+                            : 'bg-white dark:bg-[#1A1A1A] text-[#0057FF] dark:text-[#D4F000] border-2 border-[#0057FF] dark:border-[#D4F000]'
+                    }`}
+                >
+                    Food Limits
+                </button>
+            </div>
+
+            {/* Date Strip */}
+            <div ref={scrollRef} className="flex overflow-x-auto gap-2 sm:gap-3 pb-4 px-4 sm:px-6 snap-x snap-mandatory scrollbar-hide scroll-px-4" style={{ scrollBehavior: 'smooth' }}>
                 {dates.map((date, idx) => {
                     const isSelected = isSameDay(date, selectedDate);
                     const isToday = isSameDay(date, new Date().toLocaleDateString('en-CA'));
@@ -37,28 +67,28 @@ export const DateStrip = ({ selectedDate, onSelectDate, theme = 'orange' }) => {
                             data-today={isToday}
                             onClick={() => onSelectDate(date.toLocaleDateString('en-CA'))}
                             className={[
-                                'flex-shrink-0 w-16 h-20 rounded-2xl flex flex-col items-center justify-center transition-all duration-300 snap-center border-[4px]',
+                                'flex-shrink-0 w-16 sm:w-20 h-20 sm:h-24 rounded-xl sm:rounded-2xl flex flex-col items-center justify-center transition-all duration-300 snap-center border-2 sm:border-[3px]',
                                 isSelected
-                                    ? 'bg-primary text-white dark:text-[#0D0D0D] border-primary scale-110 shadow-[0_8px_24px_rgba(var(--color-primary),0.3)]'
+                                    ? 'bg-[#0057FF] text-white dark:bg-[#D4F000] dark:text-[#0D0D0D] border-[#0057FF] dark:border-[#D4F000] scale-105 shadow-lg'
                                     : [
-                                        'bg-white dark:bg-[#1A1A1A] text-[#6B6B6B] dark:text-[#A0A0A0]',
-                                        'border-zinc-200 dark:border-zinc-800',
-                                        'hover:bg-[#F0F0F0] dark:hover:bg-[#2A2A2A] hover:text-[#0D0D0D] dark:hover:text-white shadow-sm',
-                                        isToday ? 'border-primary' : '',
+                                        'bg-white dark:bg-[#1A1A1A] text-[#0D0D0D] dark:text-white',
+                                        'border-zinc-300 dark:border-[#2A2A2A]',
+                                        'hover:border-[#0057FF] dark:hover:border-[#D4F000] shadow-sm',
+                                        isToday ? 'border-[#0057FF] dark:border-[#D4F000]' : '',
                                     ].join(' '),
                             ].join(' ')}
                         >
-                            <span className={`text-[9px] font-bold uppercase tracking-wider ${isSelected ? 'opacity-90' : ''}`}>
+                            <span className={`text-[7px] sm:text-[8px] font-heading font-black uppercase tracking-wider ${isSelected ? 'opacity-90' : 'opacity-70'}`}>
                                 {date.toLocaleDateString('en-US', { month: 'short' })}
                             </span>
-                            <span className={`text-xl font-heading font-black my-0.5`}>
+                            <span className={`text-lg sm:text-2xl font-heading font-black my-0.5`}>
                                 {date.getDate()}
                             </span>
-                            <span className={`text-[10px] font-bold uppercase`}>
+                            <span className={`text-[8px] sm:text-[9px] font-bold uppercase ${isSelected ? 'opacity-90' : 'opacity-70'}`}>
                                 {date.toLocaleDateString('en-US', { weekday: 'short' })}
                             </span>
                             {isToday && (
-                                <span className={`text-[8px] font-black mt-1 ${isSelected ? 'opacity-80' : 'text-[#0057FF] dark:text-[#D4F000]'}`}>
+                                <span className={`text-[6px] sm:text-[7px] font-black mt-0.5 tracking-wider ${isSelected ? 'opacity-80' : 'text-[#0057FF] dark:text-[#D4F000]'}`}>
                                     TODAY
                                 </span>
                             )}

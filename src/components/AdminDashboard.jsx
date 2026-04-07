@@ -70,6 +70,8 @@ export const AdminDashboard = ({ user, userData, onLogout, onSwitchToUser, confi
     const [showMiniAdminModal, setShowMiniAdminModal] = useState(false);
     const [miniAdminTargetUser, setMiniAdminTargetUser] = useState(null);
     const [miniAdminHostels, setMiniAdminHostels] = useState([]);
+    const [showCommitteeModal, setShowCommitteeModal] = useState(false);
+    const [committeeModalUser, setCommitteeModalUser] = useState(null);
 
     // Data states
     const [usersList, setUsersList] = useState([]);
@@ -800,15 +802,58 @@ export const AdminDashboard = ({ user, userData, onLogout, onSwitchToUser, confi
         }
     };
 
+    // Audit logging for role changes and sensitive actions
+    const createAuditLog = async (action, targetUserId, targetUserData, changes) => {
+        try {
+            await addDoc(collection(db, 'artifacts', appId, 'audit_logs'), {
+                timestamp: serverTimestamp(),
+                action,
+                performedBy: user.uid,
+                performedByName: userData.name,
+                performedByEmail: user.email,
+                targetUserId,
+                targetUserEmail: targetUserData?.email,
+                targetUserName: targetUserData?.name,
+                targetUserHostel: targetUserData?.hostel,
+                previousRole: targetUserData?.role,
+                changes,
+                updatedAt: serverTimestamp()
+            });
+        } catch (e) {
+            console.error('Failed to create audit log:', e);
+            // Don't show error to user - audit failure shouldn't block the action
+        }
+    };
+
     const assignCommitteeRole = async (userId, role) => {
         try {
-            await updateDoc(
-                doc(db, 'artifacts', appId, 'users', userId),
-                {
-                    committeeRole: role || null,
-                    updatedAt: serverTimestamp()
-                }
-            );
+            // Get user data to lock their hostel when assigning committee role
+            const userRef = doc(db, 'artifacts', appId, 'users', userId);
+            const userSnap = await getDoc(userRef);
+            const userData = userSnap.data();
+            
+            // Only update if assigning a new role (not removing)
+            const updateData = {
+                committeeRole: role || null,
+                updatedAt: serverTimestamp()
+            };
+            
+            // If assigning a committee role (not null), lock the hostel
+            if (role) {
+                updateData.assignedHostels = userData?.hostel ? [userData.hostel] : [];
+                updateData.hostelLockedAt = serverTimestamp();
+                updateData.hostelLockedReason = `committee_${role}_role_assigned`;
+            }
+            
+            await updateDoc(userRef, updateData);
+            
+            // Create audit log
+            await createAuditLog('COMMITTEE_ROLE_CHANGE', userId, userData, {
+                previousCommitteeRole: userData?.committeeRole,
+                newCommitteeRole: role,
+                newCommitteeRoleLabel: role ? COMMITTEE_ROLES[role] : 'None'
+            });
+            
             toast.success(role
                 ? `Committee role assigned: ${COMMITTEE_ROLES[role]}`
                 : 'Committee role removed.'
@@ -984,8 +1029,13 @@ export const AdminDashboard = ({ user, userData, onLogout, onSwitchToUser, confi
             onConfirm: async () => {
                 setConfirmModal(prev => ({ ...prev, isOpen: false }));
                 try {
+                    // Get user data before update
+                    const userRef = doc(db, 'artifacts', appId, 'users', userId);
+                    const userSnap = await getDoc(userRef);
+                    const userData = userSnap.data();
+
                     await updateDoc(
-                        doc(db, 'artifacts', appId, 'users', userId),
+                        userRef,
                         {
                             previousRole: currentRole,
                             role: 'revoked',
@@ -993,6 +1043,14 @@ export const AdminDashboard = ({ user, userData, onLogout, onSwitchToUser, confi
                             updatedAt: serverTimestamp()
                         }
                     );
+
+                    // Create audit log
+                    await createAuditLog('USER_ACCESS_REVOKED', userId, userData, {
+                        previousRole: currentRole,
+                        newRole: 'revoked',
+                        reason: 'Admin revoked access'
+                    });
+
                     setSuccessModal({
                         isOpen: true,
                         title: "Access Revoked!",
@@ -1017,9 +1075,13 @@ export const AdminDashboard = ({ user, userData, onLogout, onSwitchToUser, confi
                     ...prev, isOpen: false
                 }));
                 try {
+                    // Get user data before update
+                    const userRef = doc(db, 'artifacts', appId, 'users', userId);
+                    const userSnap = await getDoc(userRef);
+                    const userData = userSnap.data();
+
                     await updateDoc(
-                        doc(db, 'artifacts', appId,
-                            'users', userId),
+                        userRef,
                         {
                             role: 'faculty',
                             adminApproved: false,
@@ -1027,6 +1089,14 @@ export const AdminDashboard = ({ user, userData, onLogout, onSwitchToUser, confi
                             updatedAt: serverTimestamp()
                         }
                     );
+
+                    // Create audit log
+                    await createAuditLog('ADMIN_ROLE_REMOVED', userId, userData, {
+                        previousRole: userData?.role,
+                        newRole: 'faculty',
+                        adminApproved: false
+                    });
+
                     setSuccessModal({
                         isOpen: true,
                         title: 'Admin Access Removed!',
@@ -1055,15 +1125,30 @@ export const AdminDashboard = ({ user, userData, onLogout, onSwitchToUser, confi
                     ...prev, isOpen: false
                 }));
                 try {
+                    // Get user data to lock their hostel when restoring admin
+                    const userRef = doc(db, 'artifacts', appId, 'users', userId);
+                    const userSnap = await getDoc(userRef);
+                    const userData = userSnap.data();
+                    
                     await updateDoc(
-                        doc(db, 'artifacts', appId,
-                            'users', userId),
+                        userRef,
                         {
                             role: 'admin',
                             adminApproved: true,
+                            assignedHostels: userData?.hostel ? [userData.hostel] : [],
+                            hostelLockedAt: serverTimestamp(),
+                            hostelLockedReason: 'admin_role_restored',
                             updatedAt: serverTimestamp()
                         }
                     );
+
+                    // Create audit log
+                    await createAuditLog('ROLE_RESTORED_TO_ADMIN', userId, userData, {
+                        previousRole: userData?.role,
+                        newRole: 'admin',
+                        adminApproved: true
+                    });
+                    
                     setSuccessModal({
                         isOpen: true,
                         title: 'Admin Access Restored!',
@@ -1091,12 +1176,14 @@ export const AdminDashboard = ({ user, userData, onLogout, onSwitchToUser, confi
         }
         if (miniAdminHostels.length > 2) {
             toast.error(
-                'Maximum 2 hostels allowed ' +
-                'for Mini Admin.'
+                'Maximum 2 hostels allowed for Mini Admin.'
             );
             return;
         }
         try {
+            // Admins can freely assign hostels
+            const hostelsToAssign = miniAdminHostels;
+            
             await updateDoc(
                 doc(db, 'artifacts', appId,
                     'users', miniAdminTargetUser.id),
@@ -1104,7 +1191,9 @@ export const AdminDashboard = ({ user, userData, onLogout, onSwitchToUser, confi
                     role: 'mini_admin',
                     approved: true,
                     adminApproved: true,
-                    assignedHostels: miniAdminHostels,
+                    assignedHostels: hostelsToAssign,
+                    hostelLockedAt: serverTimestamp(),
+                    hostelLockedReason: 'mini_admin_role_assigned',
                     updatedAt: serverTimestamp()
                 }
             );
@@ -2046,23 +2135,34 @@ export const AdminDashboard = ({ user, userData, onLogout, onSwitchToUser, confi
         usersCurrentPage * USERS_PER_PAGE
     );
 
+    // Phase 4: Role-based navigation structure
+    // super_admin: Full system access
+    // admin: All features except user role management
+    // mini_admin: Block-scoped only (checklists, proofs, feedback, ratings, users, notices from assigned blocks)
     const navItems = [
-        { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
-        ...((!isMiniAdmin) ? [
-            { id: 'leaderboard', label: 'Leaderboard', icon: Trophy },
-            { id: 'analytics', label: 'Analytics', icon: BarChart3 },
-            { id: 'menus', label: 'Menu Management', icon: Calendar },
-        ] : []),
-        { id: 'notices', label: 'Notices', icon: Megaphone },
-        { id: 'feedback', label: 'Feedback', icon: Star },
-        { id: 'reports', label: 'Bugs & Suggestions', icon: Bug },
-        { id: 'checklists', label: 'Checklists', icon: ClipboardList },
-        { id: 'proofs', label: 'Proofs Gallery', icon: ImageIcon },
-        { id: 'users', label: 'User Management', icon: Users },
-        ...(!isMiniAdmin ? [
-            { id: 'settings', label: 'Settings', icon: Settings },
-        ] : []),
-        { id: 'profile', label: 'Profile', icon: User }
+        { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard, roles: ['super_admin', 'admin', 'mini_admin'] },
+        
+        // Analytics & Reporting — super_admin and admin (admin can view but not modify)
+        { id: 'leaderboard', label: 'Leaderboard', icon: Trophy, roles: ['super_admin', 'admin'] },
+        { id: 'analytics', label: 'Analytics', icon: BarChart3, roles: ['super_admin', 'admin'] },
+        
+        // Menu Management — super_admin and admin (admin can view but not modify)
+        { id: 'menus', label: 'Menu Management', icon: Calendar, roles: ['super_admin', 'admin'] },
+        
+        // Block-scoped Management — all admins (filtered by block)
+        { id: 'notices', label: 'Notices', icon: Megaphone, roles: ['super_admin', 'admin', 'mini_admin'] },
+        { id: 'feedback', label: 'Feedback', icon: Star, roles: ['super_admin', 'admin', 'mini_admin'] },
+        { id: 'reports', label: 'Bugs & Suggestions', icon: Bug, roles: ['super_admin', 'admin', 'mini_admin'] },
+        { id: 'checklists', label: 'Checklists', icon: ClipboardList, roles: ['super_admin', 'admin', 'mini_admin'] },
+        { id: 'proofs', label: 'Proofs Gallery', icon: ImageIcon, roles: ['super_admin', 'admin', 'mini_admin'] },
+        
+        // User Management — all admins (mini_admin filtered to assigned blocks)
+        { id: 'users', label: 'User Management', icon: Users, roles: ['super_admin', 'admin', 'mini_admin'] },
+        
+        // System Settings — super_admin and admin (admin cannot add/remove admins)
+        { id: 'settings', label: 'Settings', icon: Settings, roles: ['super_admin', 'admin'] },
+        
+        { id: 'profile', label: 'Profile', icon: User, roles: ['super_admin', 'admin', 'mini_admin'] }
     ];
 
     const updateAdminProfile = async (updates) => {
@@ -4843,15 +4943,15 @@ export const AdminDashboard = ({ user, userData, onLogout, onSwitchToUser, confi
                                 <h3 className="font-heading font-bold text-[#2E7D32] dark:text-[#A78BFA] mb-4 flex items-center gap-3 tracking-tight text-lg">
                                     <Shield size={20} /> Add New Admin
                                 </h3>
-                                <div className="flex flex-col sm:flex-row gap-4">
+                                <div className="flex flex-col sm:flex-row gap-3 sm:gap-4">
                                     <input
                                         type="email"
                                         value={newAdminEmail}
                                         onChange={(e) => setNewAdminEmail(e.target.value)}
                                         placeholder="Enter user email..."
-                                        className="flex-1 p-4 bg-zinc-100 dark:bg-black/40 border border-zinc-200 dark:border-[#2E7D32]/30 rounded-xl outline-none focus:border-[#2E7D32] focus:ring-2 focus:ring-[#2E7D32]/20 text-zinc-900 dark:text-white placeholder-zinc-500 transition-colors shadow-inner"
+                                        className="flex-1 p-3 sm:p-4 bg-zinc-100 dark:bg-black/40 border border-zinc-200 dark:border-[#2E7D32]/30 rounded-xl outline-none focus:border-[#2E7D32] focus:ring-2 focus:ring-[#2E7D32]/20 text-zinc-900 dark:text-white placeholder-zinc-500 transition-colors shadow-inner text-sm"
                                     />
-                                    <Button onClick={addAdmin} disabled={!newAdminEmail.trim()} className="py-4 px-8 min-w-[150px] bg-[#2E7D32] dark:bg-[#7C3AED] text-white hover:opacity-90 shadow-md">
+                                    <Button onClick={addAdmin} disabled={!newAdminEmail.trim()} className="py-3 sm:py-4 px-4 sm:px-8 w-full sm:w-auto bg-[#2E7D32] dark:bg-[#7C3AED] text-white hover:opacity-90 shadow-md min-h-[44px] font-bold">
                                         Add Admin
                                     </Button>
                                 </div>
@@ -4867,10 +4967,7 @@ export const AdminDashboard = ({ user, userData, onLogout, onSwitchToUser, confi
                                             <th className="p-5 text-xs font-bold text-zinc-400 uppercase tracking-widest">Role</th>
                                             <th className="p-5 text-xs font-bold text-zinc-400 uppercase tracking-widest hidden md:table-cell">Assigned Hostels</th>
                                             <th className="p-5 text-xs font-bold text-zinc-400 uppercase tracking-widest hidden md:table-cell">Location</th>
-                                            <th className="p-5 text-xs font-bold text-zinc-400
-                                                uppercase tracking-widest hidden lg:table-cell">
-                                                Committee
-                                            </th>
+                                            <th className="p-5 text-xs font-bold text-zinc-400 uppercase tracking-widest hidden md:table-cell">Committee</th>
                                             <th className="p-5 text-xs font-bold text-zinc-400 uppercase tracking-widest hidden sm:table-cell">Status</th>
                                             <th className="p-5 text-xs font-bold text-zinc-400 uppercase tracking-widest text-right">Actions</th>
                                         </tr>
@@ -4901,8 +4998,8 @@ export const AdminDashboard = ({ user, userData, onLogout, onSwitchToUser, confi
                                                         {u.hostel ? `${u.hostel} (${u.messType})` : '-'}
                                                     </span>
                                                 </td>
-                                                <td className="p-5 hidden lg:table-cell">
-                                                    {isSuperAdmin ? (
+                                                <td className="p-5 hidden md:table-cell">
+                                                    {!isMiniAdmin && (isSuperAdmin || userData?.role === 'admin') ? (
                                                         <select
                                                             value={u.committeeRole || ''}
                                                             onChange={(e) =>
@@ -4936,22 +5033,24 @@ export const AdminDashboard = ({ user, userData, onLogout, onSwitchToUser, confi
                                                         {u.approved ? 'Active' : 'Pending'}
                                                     </Badge>
                                                 </td>
-                                                <td className="p-5 text-right w-1 min-w-[160px]">
-                                                    <div className="flex flex-col gap-1.5
-                                                        items-end">
-                                                        {u.role === 'revoked' ? (
+                                                <td className="p-2 sm:p-5 text-right w-1 min-w-fit sm:min-w-[160px]">
+                                                    <div className="flex flex-col gap-0.5 sm:gap-1.5 items-end">
+                                                        {/* Mini Admin: Can only download/view, no role assignments */}
+                                                        {isMiniAdmin ? (
+                                                            <span className="text-xs text-zinc-400 italic">View Only</span>
+                                                        ) : u.role === 'revoked' ? (
                                                             <button
                                                                 onClick={(e) => {
                                                                     e.stopPropagation();
                                                                     approveUser(u.id, u);
                                                                 }}
-                                                                className="text-xs py-1.5 px-3
-                                                                    rounded-xl bg-emerald-500/10
+                                                                className="text-xs py-1.5 sm:py-2 px-2 sm:px-3
+                                                                    rounded-lg sm:rounded-xl bg-emerald-500/10
                                                                     text-emerald-600 border
                                                                     border-emerald-500/30
                                                                     hover:bg-emerald-500
                                                                     hover:text-white
-                                                                    transition-all font-bold"
+                                                                    transition-all font-bold min-h-[40px] sm:min-h-[44px] flex items-center justify-center whitespace-nowrap"
                                                             >
                                                                 Restore Access
                                                             </button>
@@ -4962,13 +5061,13 @@ export const AdminDashboard = ({ user, userData, onLogout, onSwitchToUser, confi
                                                                         e.stopPropagation();
                                                                         demoteAdmin(u.id, u.email);
                                                                     }}
-                                                                    className="text-xs py-1.5 px-3
-                                                                        rounded-xl bg-amber-500/10
+                                                                    className="text-xs py-1.5 sm:py-2 px-2 sm:px-3
+                                                                        rounded-lg sm:rounded-xl bg-amber-500/10
                                                                         text-amber-600 border
                                                                         border-amber-500/30
                                                                         hover:bg-amber-500
                                                                         hover:text-white
-                                                                        transition-all font-bold"
+                                                                        transition-all font-bold min-h-[40px] sm:min-h-[44px] flex items-center justify-center whitespace-nowrap"
                                                                 >
                                                                     Remove Admin
                                                                 </button>
@@ -4977,13 +5076,13 @@ export const AdminDashboard = ({ user, userData, onLogout, onSwitchToUser, confi
                                                                         e.stopPropagation();
                                                                         revokeUser(u.id, u.role);
                                                                     }}
-                                                                    className="text-xs py-1.5 px-3
-                                                                        rounded-xl bg-error/10
+                                                                    className="text-xs py-1.5 sm:py-2 px-2 sm:px-3
+                                                                        rounded-lg sm:rounded-xl bg-error/10
                                                                         text-error border
                                                                         border-error/30
                                                                         hover:bg-error
                                                                         hover:text-white
-                                                                        transition-all font-bold"
+                                                                        transition-all font-bold min-h-[40px] sm:min-h-[44px] flex items-center justify-center whitespace-nowrap"
                                                                 >
                                                                     Revoke All
                                                                 </button>
@@ -4996,13 +5095,13 @@ export const AdminDashboard = ({ user, userData, onLogout, onSwitchToUser, confi
                                                                         e.stopPropagation();
                                                                         restoreAdmin(u.id);
                                                                     }}
-                                                                    className="text-xs py-1.5 px-3
-                                                                        rounded-xl bg-blue-500/10
+                                                                    className="text-xs py-1.5 sm:py-2 px-2 sm:px-3
+                                                                        rounded-lg sm:rounded-xl bg-blue-500/10
                                                                         text-blue-600 border
                                                                         border-blue-500/30
                                                                         hover:bg-blue-500
                                                                         hover:text-white
-                                                                        transition-all font-bold"
+                                                                        transition-all font-bold min-h-[40px] sm:min-h-[44px] flex items-center justify-center whitespace-nowrap"
                                                                 >
                                                                     Make Admin
                                                                 </button>
@@ -5010,18 +5109,15 @@ export const AdminDashboard = ({ user, userData, onLogout, onSwitchToUser, confi
                                                                     onClick={(e) => {
                                                                         e.stopPropagation();
                                                                         setMiniAdminTargetUser(u);
-                                                                        setMiniAdminHostels(
-                                                                            u.assignedHostels || []
-                                                                        );
                                                                         setShowMiniAdminModal(true);
                                                                     }}
-                                                                    className="text-xs py-1.5 px-3
-                                                                        rounded-xl bg-purple-500/10
+                                                                    className="text-xs py-1.5 sm:py-2 px-2 sm:px-3
+                                                                        rounded-lg sm:rounded-xl bg-purple-500/10
                                                                         text-purple-600 border
                                                                         border-purple-500/30
                                                                         hover:bg-purple-500
                                                                         hover:text-white
-                                                                        transition-all font-bold"
+                                                                        transition-all font-bold min-h-[40px] sm:min-h-[44px] flex items-center justify-center whitespace-nowrap"
                                                                 >
                                                                     Mini Admin
                                                                 </button>
@@ -5030,13 +5126,13 @@ export const AdminDashboard = ({ user, userData, onLogout, onSwitchToUser, confi
                                                                         e.stopPropagation();
                                                                         revokeUser(u.id, u.role);
                                                                     }}
-                                                                    className="text-xs py-1.5 px-3
-                                                                        rounded-xl bg-error/10
+                                                                    className="text-xs py-1.5 sm:py-2 px-2 sm:px-3
+                                                                        rounded-lg sm:rounded-xl bg-error/10
                                                                         text-error border
                                                                         border-error/30
                                                                         hover:bg-error
                                                                         hover:text-white
-                                                                        transition-all font-bold"
+                                                                        transition-all font-bold min-h-[40px] sm:min-h-[44px] flex items-center justify-center whitespace-nowrap"
                                                                 >
                                                                     Revoke
                                                                 </button>
@@ -5047,18 +5143,15 @@ export const AdminDashboard = ({ user, userData, onLogout, onSwitchToUser, confi
                                                                     onClick={(e) => {
                                                                         e.stopPropagation();
                                                                         setMiniAdminTargetUser(u);
-                                                                        setMiniAdminHostels(
-                                                                            u.assignedHostels || []
-                                                                        );
                                                                         setShowMiniAdminModal(true);
                                                                     }}
-                                                                    className="text-xs py-1.5 px-3
-                                                                        rounded-xl bg-purple-500/10
+                                                                    className="text-xs py-1.5 sm:py-2 px-2 sm:px-3
+                                                                        rounded-lg sm:rounded-xl bg-purple-500/10
                                                                         text-purple-600 border
                                                                         border-purple-500/30
                                                                         hover:bg-purple-500
                                                                         hover:text-white
-                                                                        transition-all font-bold"
+                                                                        transition-all font-bold min-h-[40px] sm:min-h-[44px] flex items-center justify-center whitespace-nowrap"
                                                                 >
                                                                     Edit Hostels
                                                                 </button>
@@ -5067,13 +5160,13 @@ export const AdminDashboard = ({ user, userData, onLogout, onSwitchToUser, confi
                                                                         e.stopPropagation();
                                                                         removeMiniAdmin(u.id);
                                                                     }}
-                                                                    className="text-xs py-1.5 px-3
-                                                                        rounded-xl bg-amber-500/10
+                                                                    className="text-xs py-1.5 sm:py-2 px-2 sm:px-3
+                                                                        rounded-lg sm:rounded-xl bg-amber-500/10
                                                                         text-amber-600 border
                                                                         border-amber-500/30
                                                                         hover:bg-amber-500
                                                                         hover:text-white
-                                                                        transition-all font-bold"
+                                                                        transition-all font-bold min-h-[40px] sm:min-h-[44px] flex items-center justify-center whitespace-nowrap"
                                                                 >
                                                                     Remove Mini Admin
                                                                 </button>
@@ -5082,13 +5175,13 @@ export const AdminDashboard = ({ user, userData, onLogout, onSwitchToUser, confi
                                                                         e.stopPropagation();
                                                                         revokeUser(u.id, u.role);
                                                                     }}
-                                                                    className="text-xs py-1.5 px-3
-                                                                        rounded-xl bg-error/10
+                                                                    className="text-xs py-1.5 sm:py-2 px-2 sm:px-3
+                                                                        rounded-lg sm:rounded-xl bg-error/10
                                                                         text-error border
                                                                         border-error/30
                                                                         hover:bg-error
                                                                         hover:text-white
-                                                                        transition-all font-bold"
+                                                                        transition-all font-bold min-h-[40px] sm:min-h-[44px] flex items-center justify-center whitespace-nowrap"
                                                                 >
                                                                     Revoke
                                                                 </button>
@@ -5099,15 +5192,27 @@ export const AdminDashboard = ({ user, userData, onLogout, onSwitchToUser, confi
                                                                     e.stopPropagation();
                                                                     revokeUser(u.id, u.role);
                                                                 }}
-                                                                className="text-xs py-1.5 px-3
-                                                                    rounded-xl bg-error/10 text-error
+                                                                className="text-xs py-1.5 sm:py-2 px-2 sm:px-3
+                                                                    rounded-lg sm:rounded-xl bg-error/10 text-error
                                                                     border border-error/30
                                                                     hover:bg-error hover:text-white
-                                                                    transition-all font-bold"
+                                                                    transition-all font-bold min-h-[40px] sm:min-h-[44px] flex items-center justify-center whitespace-nowrap"
                                                             >
                                                                 Revoke
                                                             </button>
                                                         ) : null}
+                                                        {!isMiniAdmin && (isSuperAdmin || userData?.role === 'admin') && (
+                                                            <button
+                                                                onClick={(e) => {
+                                                                    e.stopPropagation();
+                                                                    setCommitteeModalUser(u);
+                                                                    setShowCommitteeModal(true);
+                                                                }}
+                                                                className="text-xs py-1.5 sm:py-2 px-2 sm:px-3 rounded-lg sm:rounded-xl bg-indigo-500/10 text-indigo-600 border border-indigo-500/30 hover:bg-indigo-500 hover:text-white transition-all font-bold min-h-[40px] sm:min-h-[44px] flex items-center justify-center whitespace-nowrap lg:hidden"
+                                                            >
+                                                                Set Committee
+                                                            </button>
+                                                        )}
                                                     </div>
                                                 </td>
                                             </tr>
@@ -6152,10 +6257,11 @@ export const AdminDashboard = ({ user, userData, onLogout, onSwitchToUser, confi
             {/* Main Content */}
             <main className="flex-1 flex flex-col h-screen overflow-hidden z-10 relative bg-[#F7F7F7] dark:bg-[#0D0D14]">
                 {/* Top header */}
-                <header className="h-14 shrink-0 sticky top-0 z-30
+                <header className="h-14 shrink-0 fixed top-0 right-0 z-30
                                    bg-white dark:bg-[#11111C]
                                    border-b border-[#EEEEEE] dark:border-[#1E1E2E]
-                                   flex items-center px-4 lg:px-8 justify-between shadow-sm">
+                                   flex items-center px-4 lg:px-8 justify-between shadow-sm"
+                                   style={{ left: navOpen ? '256px' : '64px', transition: 'left 0.3s ease' }}>
                     <div className="flex-1 lg:hidden" />
                     <h2 className="flex items-center gap-2 text-sm font-black text-[#0D0D0D] dark:text-[#F0F0FF] tracking-tight">
                         <div className="p-1.5 rounded-lg bg-[#E8F5E9] dark:bg-[#1E1E35]">
@@ -6202,7 +6308,7 @@ export const AdminDashboard = ({ user, userData, onLogout, onSwitchToUser, confi
                     </div>
                 </header>
 
-                <div className="flex-1 overflow-y-auto p-4 lg:p-8 animate-fade-in pb-32">
+                <div className="flex-1 overflow-y-auto p-4 lg:p-8 animate-fade-in pb-32 pt-14">
                     <div className="max-w-7xl mx-auto">
                         {renderContent()}
                     </div>
@@ -6259,18 +6365,10 @@ export const AdminDashboard = ({ user, userData, onLogout, onSwitchToUser, confi
             />
 
             {showMiniAdminModal && (
-                <div className="fixed inset-0 z-[200]
-                    bg-black/60 backdrop-blur-sm flex
-                    items-center justify-center p-6">
-                    <div className="bg-white
-                        dark:bg-[#1A1A2E] rounded-3xl
-                        shadow-2xl p-6 w-full max-w-sm
-                        border border-white/10">
+                <div className="fixed inset-0 z-[200] bg-black/60 backdrop-blur-sm flex items-center justify-center p-4 sm:p-6">
+                    <div className="bg-white dark:bg-[#1A1A2E] rounded-2xl sm:rounded-3xl shadow-2xl p-4 sm:p-6 w-full max-w-sm border border-white/10 max-h-[90vh] overflow-y-auto">
 
-                        <h3 className="font-heading
-                            font-black text-lg text-dark
-                            dark:text-white tracking-tight
-                            mb-1">
+                        <h3 className="font-heading font-black text-base sm:text-lg text-dark dark:text-white tracking-tight mb-1">
                             Assign Mini Admin
                         </h3>
                         <p className="text-xs text-zinc-400
@@ -6281,8 +6379,7 @@ export const AdminDashboard = ({ user, userData, onLogout, onSwitchToUser, confi
                             Select up to 2 hostels.
                         </p>
 
-                        <div className="grid grid-cols-2
-                            gap-2 mb-6 max-h-48
+                        <div className="grid grid-cols-2 gap-2 mb-6 max-h-48
                             overflow-y-auto">
                             {(config?.hostels ||
                                 DEFAULT_HOSTELS).map(h => (
@@ -6308,9 +6405,9 @@ export const AdminDashboard = ({ user, userData, onLogout, onSwitchToUser, confi
                                             return [...prev, h];
                                         });
                                     }}
-                                    className={`p-3 rounded-xl
-                                        text-sm font-bold
-                                        border-2 transition-all
+                                    className={`p-2 sm:p-3 rounded-xl
+                                        text-xs sm:text-sm font-bold
+                                        border-2 transition-all min-h-[44px] flex items-center justify-center
                                         ${miniAdminHostels
                                             .includes(h)
                                             ? 'bg-purple-500 text-white border-purple-500'
@@ -6330,15 +6427,15 @@ export const AdminDashboard = ({ user, userData, onLogout, onSwitchToUser, confi
                                 : miniAdminHostels.join(', ')}
                         </p>
 
-                        <div className="flex gap-3">
+                        <div className="flex flex-col sm:flex-row gap-3">
                             <Button
                                 onClick={saveMiniAdmin}
-                                className="flex-1 py-3
+                                className="flex-1 py-2.5 sm:py-3
                                     font-black uppercase
-                                    tracking-widest
+                                    tracking-widest text-xs sm:text-sm
                                     bg-purple-500
                                     hover:bg-purple-600
-                                    text-white border-0"
+                                    text-white border-0 min-h-[44px]"
                             >
                                 Save
                             </Button>
@@ -6353,11 +6450,89 @@ export const AdminDashboard = ({ user, userData, onLogout, onSwitchToUser, confi
                                     setMiniAdminHostels([]);
                                 }}
                                 variant="secondary"
-                                className="flex-1 py-3
+                                className="flex-1 py-2.5 sm:py-3
                                     font-black uppercase
-                                    tracking-widest"
+                                    tracking-widest text-xs sm:text-sm min-h-[44px]"
                             >
                                 Cancel
+                            </Button>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {showCommitteeModal && committeeModalUser && (
+                <div className="fixed inset-0 z-[200] bg-black/60 backdrop-blur-sm flex items-center justify-center p-4 sm:p-6">
+                    <div className="bg-white dark:bg-[#1A1A2E] rounded-2xl sm:rounded-3xl shadow-2xl p-4 sm:p-6 w-full max-w-sm border border-white/10 max-h-[90vh] overflow-y-auto">
+
+                        <h3 className="font-heading font-black text-base sm:text-lg text-dark dark:text-white tracking-tight mb-2">
+                            Assign Committee Role
+                        </h3>
+                        <p className="text-xs text-zinc-400
+                            font-medium mb-4">
+                            {committeeModalUser?.name
+                                || committeeModalUser?.email}
+                        </p>
+
+                        <div className="space-y-2 mb-6 max-h-60
+                            overflow-y-auto">
+                            <button
+                                onClick={() => {
+                                    assignCommitteeRole(
+                                        committeeModalUser.id,
+                                        ''
+                                    );
+                                    setShowCommitteeModal(false);
+                                    setCommitteeModalUser(null);
+                                }}
+                                className={`w-full p-3 rounded-xl
+                                    text-xs sm:text-sm font-bold
+                                    border-2 transition-all min-h-[44px] flex items-center justify-center
+                                    ${!committeeModalUser.committeeRole
+                                        ? 'bg-indigo-500 text-white border-indigo-500'
+                                        : 'bg-zinc-50 dark:bg-black/20 text-zinc-700 dark:text-white border-zinc-200 dark:border-white/10 hover:border-indigo-500'
+                                    }`}
+                            >
+                                None
+                            </button>
+                            {Object.entries(COMMITTEE_ROLES).map(
+                                ([key, label]) => (
+                                    <button
+                                        key={key}
+                                        onClick={() => {
+                                            assignCommitteeRole(
+                                                committeeModalUser.id,
+                                                key
+                                            );
+                                            setShowCommitteeModal(false);
+                                            setCommitteeModalUser(null);
+                                        }}
+                                        className={`w-full p-3 rounded-xl
+                                            text-xs sm:text-sm font-bold
+                                            border-2 transition-all min-h-[44px] flex items-center justify-center
+                                            ${committeeModalUser.committeeRole === key
+                                                ? 'bg-indigo-500 text-white border-indigo-500'
+                                                : 'bg-zinc-50 dark:bg-black/20 text-zinc-700 dark:text-white border-zinc-200 dark:border-white/10 hover:border-indigo-500'
+                                            }`}
+                                    >
+                                        {label}
+                                    </button>
+                                )
+                            )}
+                        </div>
+
+                        <div className="flex flex-col sm:flex-row gap-3">
+                            <Button
+                                onClick={() => {
+                                    setShowCommitteeModal(false);
+                                    setCommitteeModalUser(null);
+                                }}
+                                variant="secondary"
+                                className="flex-1 py-2.5 sm:py-3
+                                    font-black uppercase
+                                    tracking-widest text-xs sm:text-sm min-h-[44px]"
+                            >
+                                Close
                             </Button>
                         </div>
                     </div>
@@ -6367,46 +6542,47 @@ export const AdminDashboard = ({ user, userData, onLogout, onSwitchToUser, confi
             {showQrModal && qrCodeUrl && (
                 <div className="fixed inset-0 z-[200]
                     bg-black/70 backdrop-blur-sm flex
-                    items-center justify-center p-6">
+                    items-center justify-center p-4 sm:p-6">
                     <div className="bg-white
-                        dark:bg-[#1A1A2E] rounded-3xl
-                        shadow-2xl p-8 w-full max-w-sm
-                        border border-white/10 text-center">
+                        dark:bg-[#1A1A2E] rounded-2xl sm:rounded-3xl
+                        shadow-2xl p-4 sm:p-8 w-full max-w-sm
+                        border border-white/10 text-center max-h-[90vh] overflow-y-auto">
 
                         <h3 className="font-heading
-                            font-black text-xl text-dark
+                            font-black text-base sm:text-xl text-dark
                             dark:text-white tracking-tight
                             mb-2">
                             MessMeal QR Code
                         </h3>
                         <p className="text-xs text-zinc-400
-                            font-medium mb-6">
+                            font-medium mb-4 sm:mb-6">
                             Students scan this to open
                             the app directly
                         </p>
 
-                        <div className="bg-white p-4
+                        <div className="bg-white p-3 sm:p-4
                             rounded-2xl inline-block
-                            shadow-inner mb-6">
+                            shadow-inner mb-4 sm:mb-6">
                             <img
                                 src={qrCodeUrl}
                                 alt="MessMeal QR Code"
-                                className="w-48 h-48"
+                                className="w-40 sm:w-48 h-40 sm:h-48"
                             />
                         </div>
 
-                        <p className="text-[11px]
-                            text-zinc-400 font-bold mb-6
+                        <p className="text-[10px] sm:text-[11px]
+                            text-zinc-400 font-bold mb-4 sm:mb-6
                             uppercase tracking-widest">
                             messmeal4students.vercel.app
                         </p>
 
-                        <div className="flex gap-3">
+                        <div className="flex flex-col sm:flex-row gap-3">
                             <Button
                                 onClick={downloadQRCode}
-                                className="flex-1 py-3
+                                className="flex-1 py-2.5 sm:py-3
                                     font-black uppercase
-                                    tracking-widest"
+                                    tracking-widest text-xs sm:text-sm
+                                    min-h-[44px] flex items-center justify-center"
                             >
                                 <Download size={16}
                                     className="mr-2" />
@@ -6416,9 +6592,10 @@ export const AdminDashboard = ({ user, userData, onLogout, onSwitchToUser, confi
                                 onClick={() =>
                                     setShowQrModal(false)}
                                 variant="secondary"
-                                className="flex-1 py-3
+                                className="flex-1 py-2.5 sm:py-3
                                     font-black uppercase
-                                    tracking-widest"
+                                    tracking-widest text-xs sm:text-sm
+                                    min-h-[44px]"
                             >
                                 Close
                             </Button>
@@ -6426,6 +6603,13 @@ export const AdminDashboard = ({ user, userData, onLogout, onSwitchToUser, confi
                     </div>
                 </div>
             )}
+
+            {/* Copyright Footer */}
+            <div className="fixed bottom-4 left-0 right-0 flex justify-center pointer-events-none">
+                <p className="text-xs text-center text-zinc-600 dark:text-zinc-400">
+                    © {new Date().getFullYear()} MessMeal. All rights reserved
+                </p>
+            </div>
         </div>
     );
 };

@@ -790,8 +790,8 @@ Keep the health tip short, practical and encouraging.`;
             <OfflineIndicator />
 
             {/* ── HEADER ─────────────────────────────────────────────── */}
-            <header className="sticky top-0 z-40 bg-white dark:bg-[#0D0D0D] border-b border-[#E4E4E4] dark:border-[#2A2A2A] px-4 py-3 shadow-card">
-                <div className="max-w-7xl mx-auto flex justify-between items-center">
+            <header className="fixed top-0 left-0 right-0 z-40 bg-white dark:bg-[#0D0D0D] border-b border-[#E4E4E4] dark:border-[#2A2A2A] px-3 sm:px-4 py-2 sm:py-3 shadow-card">
+                <div className="max-w-7xl mx-auto flex justify-between items-center gap-2 sm:gap-3">
                     <div className="flex items-center gap-3">
                         <motion.img
                             layoutId="logo"
@@ -927,9 +927,9 @@ Keep the health tip short, practical and encouraging.`;
                 </div>
             </header>
 
-            <main className="max-w-7xl mx-auto p-4"
+            <main className="max-w-7xl mx-auto px-3 sm:px-4 py-4 pt-[70px]"
                 style={{
-                    paddingBottom: 'max(8rem, calc(8rem + env(safe-area-inset-bottom, 0px)))'
+                    paddingBottom: 'max(7rem, calc(7rem + env(safe-area-inset-bottom, 0px)))'
                 }}>
                 {showChecklist ? (
                     <div className="animate-fade-in">
@@ -1504,6 +1504,24 @@ Keep the health tip short, practical and encouraging.`;
                     </div>
                 )}
 
+                {activeTab === 'checklists' && (
+                    <div className="w-full max-w-4xl mx-auto space-y-6 animate-fade-in mt-4 pb-24">
+                        {(userData?.role === 'admin' || userData?.role === 'mini_admin' || userData?.role === 'super_admin' || userData?.committeeRole) ? (
+                            <CommitteeChecklist user={user} userData={userData} config={config} />
+                        ) : (
+                            <div className="flex flex-col items-center justify-center p-14 bg-white dark:bg-[#1A1A1A] rounded-2xl border-2 border-dashed border-[#CCCCCC] dark:border-[#444444] shadow-md">
+                                <Shield className="text-[#6B6B6B] mb-4" size={40} />
+                                <p className="text-[#0D0D0D] dark:text-[#E0E0E0] font-bold text-lg text-center uppercase tracking-tight">
+                                    Access Restricted
+                                </p>
+                                <p className="text-[#6B6B6B] dark:text-[#A0A0A0] text-sm text-center mt-2">
+                                    Only admins and committee members can access checklists
+                                </p>
+                            </div>
+                        )}
+                    </div>
+                )}
+
                 {activeTab === 'profile' && (
                     <div className="w-full max-w-4xl mx-auto space-y-6 animate-fade-in mt-4 pb-24">
                         {/* Profile Completion Card */}
@@ -1622,10 +1640,22 @@ Keep the health tip short, practical and encouraging.`;
                                 </div>
                             </div>
                             <div className="space-y-3">
-                                <div className="flex justify-between p-4 bg-white dark:bg-slate-800 border border-black/5 dark:border-white/5 rounded-2xl shadow-sm">
-                                    <span className="text-sm font-bold text-mid uppercase tracking-widest">Hostel</span>
+                                <div className="flex items-center justify-between p-4 bg-white dark:bg-slate-800 border border-black/5 dark:border-white/5 rounded-2xl shadow-sm">
+                                    <div className="flex items-center gap-2">
+                                        <span className="text-sm font-bold text-mid uppercase tracking-widest">Hostel</span>
+                                        {userData?.hostelLockedAt && userData?.role === 'student' && (
+                                            <span className="text-[9px] font-bold bg-amber-100 dark:bg-amber-500/20 text-amber-700 dark:text-amber-400 px-2 py-0.5 rounded-full flex items-center gap-1">
+                                                🔒 Locked
+                                            </span>
+                                        )}
+                                    </div>
                                     <span className="text-sm font-semibold text-dark dark:text-white">{userData?.hostel}</span>
                                 </div>
+                                {userData?.hostelLockedAt && userData?.role === 'student' && (
+                                    <p className="text-[10px] text-amber-600 dark:text-amber-400 font-medium italic ml-1">
+                                        Your hostel is locked due to your role assignment and cannot be changed.
+                                    </p>
+                                )}
                                 {userData?.hostel &&
                                     config?.hostels &&
                                     !config.hostels.includes(userData.hostel) && (
@@ -1971,27 +2001,31 @@ Keep the health tip short, practical and encouraging.`;
                 )}
             </main>
 
-            <nav className="fixed bottom-4 left-1/2 -translate-x-1/2 bg-white dark:bg-[#0D0D0D] border border-[#E4E4E4] dark:border-[#2A2A2A] p-1.5 rounded-pill flex justify-between gap-1 shadow-card-md dark:shadow-card-dark z-50 w-[92%] max-w-sm"
+            <nav className="fixed bottom-0 left-0 right-0 bg-white dark:bg-[#0D0D0D] border-t border-[#E4E4E4] dark:border-[#2A2A2A] flex justify-between gap-1 shadow-card-md dark:shadow-card-dark z-50 px-2 py-2"
                 style={{
-                    paddingBottom: 'env(safe-area-inset-bottom, 0px)',
-                    bottom: 'max(16px, env(safe-area-inset-bottom, 16px))'
+                    paddingBottom: 'max(8px, env(safe-area-inset-bottom, 8px))',
+                    paddingLeft: 'max(8px, env(safe-area-inset-left, 8px))',
+                    paddingRight: 'max(8px, env(safe-area-inset-right, 8px))'
                 }}>
                 {[
                     { id: 'menu', icon: Utensils, label: 'Menu' },
                     { id: 'feedback', icon: Star, label: 'Rate' },
                     { id: 'complaints', icon: Camera, label: 'Proof' },
+                    ...(userData?.role === 'admin' || userData?.role === 'mini_admin' || userData?.role === 'super_admin' || userData?.committeeRole ? [
+                        { id: 'checklists', icon: ClipboardList, label: 'Checklists' }
+                    ] : []),
                     { id: 'profile', icon: User, label: 'Profile' }
                 ].map(({ id, icon: TabIcon, label }) => (
                     <button
                         key={id}
                         onClick={() => setActiveTab(id)}
-                        className={`flex-1 py-2.5 px-2 rounded-pill flex flex-col items-center gap-1 transition-all duration-200 outline-none ${activeTab === id
+                        className={`flex-1 py-2 sm:py-2.5 px-1 sm:px-2 rounded-xl sm:rounded-pill flex flex-col items-center gap-0.5 sm:gap-1 transition-all duration-200 outline-none min-height-[44px] ${activeTab === id
                             ? 'bg-[#0057FF] text-white dark:bg-[#D4F000] dark:text-[#0D0D0D] shadow-blue-glow dark:shadow-nik-btn scale-[1.02]'
                             : 'text-[#6B6B6B] dark:text-[#A0A0A0] hover:text-[#0D0D0D] dark:hover:text-white'
                             }`}
                     >
-                        <TabIcon size={18} strokeWidth={activeTab === id ? 2.5 : 2} />
-                        <span className="text-[9px] font-bold tracking-wide uppercase">{label}</span>
+                        <TabIcon size={16} strokeWidth={activeTab === id ? 2.5 : 2} />
+                        <span className="text-[8px] sm:text-[9px] font-bold tracking-wide uppercase">{label}</span>
                     </button>
                 ))}
             </nav>
@@ -2119,6 +2153,13 @@ Keep the health tip short, practical and encouraging.`;
                     </div>
                 </div>
             )}
+
+            {/* Copyright Footer */}
+            <div className="fixed bottom-20 left-0 right-0 flex justify-center pointer-events-none">
+                <p className="text-xs text-center text-zinc-600 dark:text-zinc-400">
+                    © {new Date().getFullYear()} MessMeal. All rights reserved
+                </p>
+            </div >
         </div >
     );
 };

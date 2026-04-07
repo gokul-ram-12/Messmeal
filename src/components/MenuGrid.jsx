@@ -53,19 +53,19 @@ export const MenuGrid = ({ menu, isLoading, activeTimings, selectedDateStr, nutr
         <div className="space-y-6">
             {/* ── HEADING ─────────────────────────────────── */}
             <div className="px-1 mb-2">
-                <h1 className="text-5xl md:text-7xl font-heading font-black tracking-tighter mb-1
+                <h1 className="text-4xl sm:text-5xl md:text-7xl font-heading font-black tracking-tighter mb-1
                                text-[#0D0D0D] section-dot
                                dark:text-white dark:uppercase dark:tracking-[-0.04em] dark:section-dot-none">
                     <span className="hidden dark:inline">MENU</span>
                     <span className="dark:hidden">Menu</span>
                 </h1>
-                <p className="text-sm text-[#0D0D0D] dark:text-[#A0A0A0] font-bold uppercase tracking-widest opacity-70">
+                <p className="text-xs sm:text-sm text-[#0D0D0D] dark:text-[#A0A0A0] font-bold uppercase tracking-widest opacity-70">
                     {format(new Date(selectedDateStr), 'EEEE, MMMM do, yyyy')}
                 </p>
             </div>
 
             {/* ── MEAL CARDS ──────────────────────────────── */}
-            <div className="grid gap-5 grid-cols-1 md:grid-cols-2 lg:grid-cols-4 items-start">
+            <div className="grid gap-3 sm:gap-5 grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 items-start">
                 {MEAL_ORDER.map(meal => {
                     const status = getMealStatus(meal, activeTimings, selectedDateStr);
                     const timing = activeTimings?.[meal] || DEFAULT_MEAL_TIMINGS[meal];
@@ -102,42 +102,42 @@ export const MenuGrid = ({ menu, isLoading, activeTimings, selectedDateStr, nutr
                     return (
                         <div key={meal} className={`rounded-[2.5rem] border-[4px] overflow-hidden transition-all duration-300 hover:shadow-2xl flex flex-col h-full bg-white dark:bg-[#1A1A1A] ${primaryBorder} ${cardCls}`}>
                             {/* Header row: solid primary color */}
-                            <div className={`p-5 flex justify-between items-center ${primaryBg}`}>
-                                <h3 className="text-sm font-black text-white dark:text-[#0D0D0D] uppercase tracking-widest flex items-center gap-2">
-                                    <IconComponent size={16} /> {meal}
+                            <div className={`p-4 sm:p-5 flex justify-between items-center gap-2 ${primaryBg}`}>
+                                <h3 className="text-xs sm:text-sm font-black text-white dark:text-[#0D0D0D] uppercase tracking-widest flex items-center gap-2 flex-shrink-0">
+                                    <IconComponent size={16} /> <span className="hidden sm:inline">{meal}</span>
                                 </h3>
-                                <span className={`text-[10px] font-black px-3 py-1.5 rounded-xl tracking-wider uppercase ${statusBadge}`}>
+                                <span className={`text-[9px] sm:text-[10px] font-black px-2.5 sm:px-3 py-1 sm:py-1.5 rounded-xl tracking-wider uppercase whitespace-nowrap flex-shrink-0 ${statusBadge}`}>
                                     {statusText}
                                 </span>
                             </div>
 
                             {/* Menu content */}
-                            <div className="p-7 flex-grow">
+                            <div className="p-4 sm:p-7 flex-grow">
                                 <div className="mb-4">
-                                    <span className={`text-[10px] font-black px-3 py-1.5 rounded-lg uppercase tracking-widest ${accent.labelCls}`}>
+                                    <span className={`text-[9px] sm:text-[10px] font-black px-3 py-1.5 rounded-lg uppercase tracking-widest ${accent.labelCls}`}>
                                         Menu Content
                                     </span>
                                 </div>
-                                <p className="text-[#0D0D0D] dark:text-[#F0F0F0] text-[16px] font-black leading-[1.6] whitespace-pre-wrap tracking-tight">
+                                <p className="text-[#0D0D0D] dark:text-[#F0F0F0] text-sm sm:text-base font-black leading-[1.6] whitespace-pre-wrap tracking-tight">
                                     {String(menuItem)}
                                 </p>
                             </div>
 
                             {/* Timing row */}
-                            <div className="px-7 pb-7 mt-auto space-y-4">
-                                <div className={`flex items-center gap-3 px-4 py-3 rounded-2xl ${timing?.isOverride ? 'bg-amber-500/10 border-2 border-amber-500/30' : 'bg-zinc-100 dark:bg-[#2A2A2A]'}`}>
-                                    <Clock4 size={15} className={timing?.isOverride ? 'text-amber-500' : 'text-[#6B6B6B] dark:text-[#A0A0A0]'} />
-                                    <span className={`text-xs font-black tracking-tight ${timing?.isOverride ? 'text-amber-600 dark:text-amber-400' : 'text-[#6B6B6B] dark:text-[#A0A0A0]'}`}>
+                            <div className="px-4 sm:px-7 pb-4 sm:pb-7 mt-auto space-y-4">
+                                <div className={`flex items-center gap-3 px-3 sm:px-4 py-2 sm:py-3 rounded-2xl text-xs sm:text-sm ${timing?.isOverride ? 'bg-amber-500/10 border-2 border-amber-500/30' : 'bg-zinc-100 dark:bg-[#2A2A2A]'}`}>
+                                    <Clock4 size={14} className={timing?.isOverride ? 'text-amber-500 flex-shrink-0' : 'text-[#6B6B6B] dark:text-[#A0A0A0] flex-shrink-0'} />
+                                    <span className={`font-black tracking-tight ${timing?.isOverride ? 'text-amber-600 dark:text-amber-400' : 'text-[#6B6B6B] dark:text-[#A0A0A0]'}`}>
                                         {format12H(timing?.start)} – {format12H(timing?.end)}
-                                        {timing?.isOverride && <span className="ml-2 text-[10px] opacity-80">(OVERRIDE)</span>}
+                                        {timing?.isOverride && <span className="ml-2 text-[9px] opacity-80">(OVERRIDE)</span>}
                                     </span>
                                 </div>
 
                                 {nutritionTips?.[meal] ? (
-                                    <div className="bg-[#0057FF]/5 dark:bg-[#D4F000]/5 p-3 rounded-xl text-xs text-[#0057FF] dark:text-[#D4F000] border border-[#0057FF]/10 dark:border-[#D4F000]/10 leading-relaxed font-medium">
+                                    <div className="bg-[#0057FF]/5 dark:bg-[#D4F000]/5 p-3 rounded-xl text-xs sm:text-sm text-[#0057FF] dark:text-[#D4F000] border border-[#0057FF]/10 dark:border-[#D4F000]/10 leading-relaxed font-medium">
                                         <Sparkles size={11} className="inline mr-1.5" />
                                         {String(nutritionTips[meal])}
-                                        <div className="mt-2 pt-2 border-t border-current opacity-30 text-[10px] italic">
+                                        <div className="mt-2 pt-2 border-t border-current opacity-30 text-[9px] sm:text-[10px] italic">
                                             Disclaimer: Nutrition analyzer data is not 100% accurate.
                                         </div>
                                     </div>
@@ -145,7 +145,7 @@ export const MenuGrid = ({ menu, isLoading, activeTimings, selectedDateStr, nutr
                                     <button
                                         onClick={() => onAnalyze(meal, menu[meal.toLowerCase()])}
                                         disabled={aiLoading === meal}
-                                        className="w-full flex items-center justify-center gap-1.5 text-xs font-semibold py-2 rounded-xl transition-all
+                                        className="w-full flex items-center justify-center gap-1.5 text-xs sm:text-sm font-semibold py-2 sm:py-2.5 rounded-xl transition-all min-h-[44px]
                                                    text-[#0057FF] hover:bg-[#0057FF]/5
                                                    dark:text-[#D4F000] dark:hover:bg-[#D4F000]/5"
                                     >

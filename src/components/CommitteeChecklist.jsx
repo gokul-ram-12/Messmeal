@@ -16,6 +16,9 @@ export const CommitteeChecklist = ({ user, userData, config }) => {
     const committeeRole = userData?.committeeRole;
     const checklist = COMMITTEE_CHECKLISTS[committeeRole];
     const hostel = userData?.hostel || 'GENERAL';
+    
+    // Check if user is an admin (can edit hostel in checklists)
+    const isAdmin = userData?.role === 'admin' || userData?.role === 'mini_admin' || userData?.role === 'super_admin';
 
     const todayStr = new Date().toLocaleDateString('en-CA');
     const currentMonth = `${new Date().getFullYear()}-${
@@ -680,11 +683,17 @@ export const CommitteeChecklist = ({ user, userData, config }) => {
                         tracking-tight">
                         {COMMITTEE_ROLES[committeeRole]}
                     </h2>
-                    <p className="text-xs font-bold
-                        text-zinc-400 uppercase tracking-widest
-                        mt-1">
-                        {hostel} · {todayStr}
-                    </p>
+                    <div className="flex items-center gap-2 mt-1">
+                        <p className="text-xs font-bold
+                            text-zinc-400 uppercase tracking-widest">
+                            {hostel} · {todayStr}
+                        </p>
+                        {!isAdmin && (
+                            <span className="text-[8px] font-bold bg-amber-100 dark:bg-amber-500/20 text-amber-700 dark:text-amber-400 px-1.5 py-0.5 rounded-full">
+                                🔒 Hostel Locked
+                            </span>
+                        )}
+                    </div>
                 </div>
                 {lastEditedBy && (
                     <div className="text-[11px] font-bold
@@ -1159,11 +1168,17 @@ export const CommitteeChecklist = ({ user, userData, config }) => {
                                         uppercase tracking-widest">
                                         Checklist History
                                     </h3>
-                                    <p className="text-xs text-zinc-500
-                                        mt-1">
-                                        {user?.email} •{' '}
-                                        {hostel}
-                                    </p>
+                                    <div className="flex items-center gap-2 mt-1">
+                                        <p className="text-xs text-zinc-500">
+                                            {user?.email} •{' '}
+                                            {hostel}
+                                        </p>
+                                        {!isAdmin && (
+                                            <span className="text-[8px] font-bold bg-amber-100 dark:bg-amber-500/20 text-amber-700 dark:text-amber-400 px-1.5 py-0.5 rounded-full">
+                                                🔒 Locked
+                                            </span>
+                                        )}
+                                    </div>
                                 </div>
                                 <div className="flex gap-2">
                                     <button

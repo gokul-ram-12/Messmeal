@@ -7,6 +7,13 @@ import { DEFAULT_HOSTELS, DEFAULT_MESS_TYPES } from '../lib/constants';
 export const ProfileSetupScreen = ({ user, userData, onComplete, config, isReadOnly = false }) => {
     const defaultHostels = config?.hostels || DEFAULT_HOSTELS;
     const defaultMessTypes = config?.messTypes || DEFAULT_MESS_TYPES;
+    
+    // Check if user is an admin who can edit hostel
+    const isAdmin = userData?.role === 'admin' || userData?.role === 'mini_admin' || userData?.role === 'super_admin';
+    
+    // Check if hostel is locked and user is a STUDENT (admins can still edit)
+    const isHostelLocked = !isAdmin && (userData?.hostelLockedAt !== undefined || userData?.hostelLockedReason !== undefined);
+    const hostelLockReason = userData?.hostelLockedReason;
 
     const [name] = useState(userData?.name || user?.displayName || user?.email?.split('@')[0] || '');
     const [avatar, setAvatar] = useState(userData?.avatar || 'boy');
@@ -167,13 +174,26 @@ export const ProfileSetupScreen = ({ user, userData, onComplete, config, isReadO
                 ) : (
                     <div className="space-y-8">
                         <div>
-                            <label className="block text-sm font-bold text-zinc-500 uppercase tracking-widest mb-4">Select Hostel</label>
+                            <div className="flex items-center justify-between mb-4">
+                                <label className="block text-sm font-bold text-zinc-500 uppercase tracking-widest">Select Hostel</label>
+                                {isHostelLocked && (
+                                    <span className="text-[10px] font-bold bg-amber-100 dark:bg-amber-500/20 text-amber-700 dark:text-amber-400 px-2 py-1 rounded-full flex items-center gap-1">
+                                        🔒 Locked
+                                    </span>
+                                )}
+                            </div>
+                            {isHostelLocked && (
+                                <p className="text-xs text-zinc-500 dark:text-zinc-400 mb-3 italic">
+                                    Your hostel is locked because you have been assigned a role. Only admins can change this.
+                                </p>
+                            )}
                             <div className="grid grid-cols-3 gap-3">
                                 {defaultHostels.map(h => (
                                     <button
                                         key={h}
-                                        onClick={() => !isReadOnly && setHostel(h)}
-                                        className={`p-3 rounded-2xl text-sm font-bold transition-all duration-200 border ${isReadOnly ? 'cursor-default' : ''} ${hostel === h ? 'bg-primary/20 text-primary border-primary shadow-sm scale-[1.02]' : 'bg-black/5 dark: text-mid dark:text-zinc-400 hover:bg-black/10 dark:hover:bg-white/10 hover:text-dark dark:hover:text-white border-black/10 dark:border-white/10'}`}
+                                        onClick={() => !isReadOnly && !isHostelLocked && setHostel(h)}
+                                        disabled={isHostelLocked}
+                                        className={`p-3 rounded-2xl text-sm font-bold transition-all duration-200 border ${isReadOnly || isHostelLocked ? 'cursor-not-allowed' : ''} ${isHostelLocked ? 'opacity-50' : ''} ${hostel === h ? 'bg-primary/20 text-primary border-primary shadow-sm scale-[1.02]' : 'bg-black/5 dark: text-mid dark:text-zinc-400 hover:bg-black/10 dark:hover:bg-white/10 hover:text-dark dark:hover:text-white border-black/10 dark:border-white/10'}`}
                                     >
                                         {h}
                                     </button>
@@ -227,6 +247,13 @@ export const ProfileSetupScreen = ({ user, userData, onComplete, config, isReadO
                         </div>
                     </div>
                 )}
+            </div>
+
+            {/* Copyright Footer */}
+            <div className="fixed bottom-4 left-0 right-0 flex justify-center">
+                <p className="text-xs text-center text-zinc-600 dark:text-zinc-400">
+                    © {new Date().getFullYear()} MessMeal. All rights reserved
+                </p>
             </div>
         </div>
     );
