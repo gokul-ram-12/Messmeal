@@ -6257,11 +6257,10 @@ export const AdminDashboard = ({ user, userData, onLogout, onSwitchToUser, confi
             {/* Main Content */}
             <main className="flex-1 flex flex-col h-screen overflow-hidden z-10 relative bg-[#F7F7F7] dark:bg-[#0D0D14]">
                 {/* Top header */}
-                <header className="h-14 shrink-0 fixed top-0 right-0 z-30
+                <header className="h-14 shrink-0 relative z-30
                                    bg-white dark:bg-[#11111C]
                                    border-b border-[#EEEEEE] dark:border-[#1E1E2E]
-                                   flex items-center px-4 lg:px-8 justify-between shadow-sm"
-                                   style={{ left: isSidebarOpen ? '256px' : '64px', transition: 'left 0.3s ease' }}>
+                                   flex items-center px-4 lg:px-8 justify-between shadow-sm">
                     <div className="flex-1 lg:hidden" />
                     <h2 className="flex items-center gap-2 text-sm font-black text-[#0D0D0D] dark:text-[#F0F0FF] tracking-tight">
                         <div className="p-1.5 rounded-lg bg-[#E8F5E9] dark:bg-[#1E1E35]">
