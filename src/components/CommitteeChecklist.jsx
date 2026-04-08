@@ -882,6 +882,14 @@ export const CommitteeChecklist = ({ user, userData, config }) => {
                         )}
                     </div>
 
+                    <div className="mb-4 p-3 bg-blue-50 dark:bg-blue-500/10 
+                        border border-blue-200 dark:border-blue-500/30 rounded-lg">
+                        <p className="text-xs text-blue-700 dark:text-blue-400 font-semibold">
+                            ℹ️ Meal windows open 30 minutes before each meal time. 
+                            Check-in buttons will appear when the window opens.
+                        </p>
+                    </div>
+
                     {/* Column headers */}
                     <div className="grid grid-cols-4 gap-2 mb-4
                         px-2">
@@ -948,14 +956,17 @@ export const CommitteeChecklist = ({ user, userData, config }) => {
                                                 {!isMealWindowOpen(meal) ? (
                                                     <div className="flex flex-col
                                                         items-center justify-center
-                                                        py-4 gap-1">
-                                                        <Clock4 size={16}
-                                                            className="text-zinc-400" />
+                                                        py-6 gap-2 bg-zinc-50 dark:bg-black/20
+                                                        rounded-lg border border-dashed border-zinc-200 dark:border-white/10">
+                                                        <Clock4 size={18}
+                                                            className="text-amber-400" />
                                                         <p className="text-[10px] font-black
-                                                            text-zinc-400 uppercase
-                                                            tracking-widest text-center">
-                                                            Opens at<br />
-                                                            {getMealOpensAt(meal)}
+                                                            text-zinc-600 dark:text-zinc-300 uppercase
+                                                            tracking-widest text-center px-2">
+                                                            Meal Window Opens at<br />
+                                                            <span className="text-sm font-black text-amber-500">
+                                                                {getMealOpensAt(meal)}
+                                                            </span>
                                                         </p>
                                                     </div>
                                                 ) : (
