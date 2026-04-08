@@ -746,19 +746,7 @@ export const CommitteeChecklist = ({ user, userData, config }) => {
                         {checklist.monthly.map(item => {
                             const entry =
                                 monthlyData[item.id] || {};
-                            const now = new Date();
-                            const isAfterMidnight =
-                                now.getHours() === 23 &&
-                                now.getMinutes() === 59 &&
-                                now.getSeconds() >= 59;
-                            const isPastToday = (() => {
-                                const todayStr =
-                                    new Date().toLocaleDateString('en-CA');
-                                return checklist.date
-                                    ? checklist.date < todayStr
-                                    : false;
-                            })();
-                            const isLocked = isAfterMidnight || isPastToday;
+                            const isLocked = isMonthlyLocked;
                             return (
                                 <div key={item.id}
                                     className="p-4 rounded-2xl
@@ -916,19 +904,7 @@ export const CommitteeChecklist = ({ user, userData, config }) => {
 
                     <div className="space-y-3">
                         {checklist.daily.map(item => {
-                            const now = new Date();
-                            const isAfterMidnight =
-                                now.getHours() === 23 &&
-                                now.getMinutes() === 59 &&
-                                now.getSeconds() >= 59;
-                            const isPastToday = (() => {
-                                const todayStr =
-                                    new Date().toLocaleDateString('en-CA');
-                                return checklist.date
-                                    ? checklist.date < todayStr
-                                    : false;
-                            })();
-                            const isLocked = isAfterMidnight || isPastToday;
+                            const isLocked = isDailyLocked;
                             return (
                                 <div key={item.id}
                                     className="p-4 rounded-2xl
@@ -1351,7 +1327,7 @@ export const CommitteeChecklist = ({ user, userData, config }) => {
                                 ) : historyTab === 'session' ? (
                                     // Session Remarks View - show each meal session with remarks
                                     <div className="bg-white dark:bg-[#16162A] rounded-2xl border border-zinc-200 dark:border-white/10 shadow-sm overflow-hidden">
-                                        <div className="overflow-auto max-h-[65vh]">
+                                        <div className="overflow-x-auto -mx-4 sm:mx-0 px-4 sm:px-0 max-h-[65vh] ">
                                             <table className="w-full text-sm border-collapse">
                                                 <thead className="sticky top-0 z-20">
                                                     <tr className="bg-gradient-to-r from-zinc-50 to-zinc-100 dark:from-white/5 dark:to-white/10 border-b-2 border-zinc-200 dark:border-white/20">
@@ -1447,7 +1423,7 @@ export const CommitteeChecklist = ({ user, userData, config }) => {
                                     </div>
                                 ) : (
                                     <div className="bg-white dark:bg-[#16162A] rounded-2xl border border-zinc-200 dark:border-white/10 shadow-sm overflow-hidden">
-                                        <div className="overflow-auto max-h-[65vh]">
+                                        <div className="overflow-x-auto -mx-4 sm:mx-0 px-4 sm:px-0 max-h-[65vh]">
                                             <table className="w-full text-sm border-collapse">
                                                 {/* Header 1: Item IDs */}
                                                 <thead className="sticky top-0 z-20">
