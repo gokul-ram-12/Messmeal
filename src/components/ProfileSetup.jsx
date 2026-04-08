@@ -27,18 +27,28 @@ export const ProfileSetupScreen = ({ user, userData, onComplete, config, isReadO
     const [registrationIdError, setRegistrationIdError] = useState('');
 
     const handleSubmit = async () => {
-        if (!name.trim()) {
-            toast.error("Please enter your name");
+        if (!name.trim() || name.trim().length < 2) {
+            toast.error("Please enter a valid name (min. 2 characters)");
+            return;
+        }
+        if (!hostel || !messType) {
+            toast.error("Please select hostel and mess type");
             return;
         }
         setLoading(true);
         try {
+            // Sanitize and validate all inputs
+            const sanitizedName = name.trim().substring(0, 100);
+            const sanitizedHostel = String(hostel).trim().toUpperCase().substring(0, 50);
+            const sanitizedMessType = String(messType).trim().toUpperCase().substring(0, 50);
+            const sanitizedRegId = registrationId.trim().toUpperCase().substring(0, 20);
+            
             const payload = {
-                name: name.trim(),
-                hostel: String(hostel).trim().toUpperCase(),
-                messType: String(messType).trim().toUpperCase(),
+                name: sanitizedName,
+                hostel: sanitizedHostel,
+                messType: sanitizedMessType,
                 avatar,
-                registrationId: registrationId.trim().toUpperCase(),
+                registrationId: sanitizedRegId,
                 ...(userData?.role !== 'faculty' && { studyingYear }),
                 updatedAt: new Date().toISOString()
             };
@@ -190,13 +200,13 @@ export const ProfileSetupScreen = ({ user, userData, onComplete, config, isReadO
                                     ℹ️ You can change your hostel anytime, but your checklist hostel is locked to <strong>{userData?.assignedCommitteeHostel}</strong> (assigned by admin). Only admins can change the checklist hostel.
                                 </p>
                             )}
-                            <div className="grid grid-cols-3 gap-3">
+                            <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 sm:gap-3">
                                 {defaultHostels.map(h => (
                                     <button
                                         key={h}
                                         onClick={() => !isReadOnly && setHostel(h)}
                                         disabled={isReadOnly}
-                                        className={`p-3 rounded-2xl text-sm font-bold transition-all duration-200 border ${isReadOnly ? 'cursor-not-allowed' : ''} ${hostel === h ? 'bg-primary/20 text-primary border-primary shadow-sm scale-[1.02]' : 'bg-black/5 dark: text-mid dark:text-zinc-400 hover:bg-black/10 dark:hover:bg-white/10 hover:text-dark dark:hover:text-white border-black/10 dark:border-white/10'}`}
+                                        className={`p-3 sm:p-4 rounded-2xl text-xs sm:text-sm font-bold transition-all duration-200 border min-h-[44px] flex items-center justify-center ${isReadOnly ? 'cursor-not-allowed' : 'cursor-pointer'} ${hostel === h ? 'bg-primary/20 text-primary border-primary shadow-sm scale-[1.02]' : 'bg-black/5 dark: text-mid dark:text-zinc-400 hover:bg-black/10 dark:hover:bg-white/10 hover:text-dark dark:hover:text-white border-black/10 dark:border-white/10'}`}
                                     >
                                         {h}
                                     </button>
@@ -206,12 +216,12 @@ export const ProfileSetupScreen = ({ user, userData, onComplete, config, isReadO
 
                         <div>
                             <label className="block text-sm font-bold text-zinc-500 uppercase tracking-widest mb-4">Select Mess Type</label>
-                            <div className="grid grid-cols-2 gap-3">
+                            <div className="grid grid-cols-2 gap-2 sm:gap-3">
                                 {defaultMessTypes.map(t => (
                                     <button
                                         key={t}
                                         onClick={() => !isReadOnly && setMessType(t)}
-                                        className={`p-4 rounded-2xl text-sm font-bold transition-all duration-200 border ${isReadOnly ? 'cursor-default' : ''} ${messType === t ? 'bg-primary/20 text-primary border-primary shadow-sm scale-[1.02]' : 'bg-black/5 dark: text-mid dark:text-zinc-400 hover:bg-black/10 dark:hover:bg-white/10 hover:text-dark dark:hover:text-white border-black/10 dark:border-white/10'}`}
+                                        className={`p-4 rounded-2xl text-xs sm:text-sm font-bold transition-all duration-200 border min-h-[44px] flex items-center justify-center ${isReadOnly ? 'cursor-default' : 'cursor-pointer'} ${messType === t ? 'bg-primary/20 text-primary border-primary shadow-sm scale-[1.02]' : 'bg-black/5 dark: text-mid dark:text-zinc-400 hover:bg-black/10 dark:hover:bg-white/10 hover:text-dark dark:hover:text-white border-black/10 dark:border-white/10'}`}
                                     >
                                         {t}
                                     </button>
@@ -222,12 +232,12 @@ export const ProfileSetupScreen = ({ user, userData, onComplete, config, isReadO
                         {userData?.role !== 'faculty' && (
                             <div>
                                 <label className="block text-sm font-bold text-zinc-500 uppercase tracking-widest mb-4">Studying Year</label>
-                                <div className="flex gap-2">
+                                <div className="flex gap-1 sm:gap-2">
                                     {['1', '2', '3', '4', '5'].map(year => (
                                         <button
                                             key={year}
                                             onClick={() => !isReadOnly && setStudyingYear(year)}
-                                            className={`flex-1 p-3 rounded-xl text-sm font-bold transition-all border ${isReadOnly ? 'cursor-default' : ''} ${studyingYear === year ? 'bg-primary/20 text-primary border-primary' : 'bg-black/5 dark:bg-white/5 border-transparent'}`}
+                                            className={`flex-1 p-3 rounded-xl text-xs sm:text-sm font-bold transition-all border min-h-[44px] flex items-center justify-center ${isReadOnly ? 'cursor-default' : 'cursor-pointer'} ${studyingYear === year ? 'bg-primary/20 text-primary border-primary' : 'bg-black/5 dark:bg-white/5 border-transparent'}`}
                                         >
                                             {year}
                                         </button>
@@ -236,12 +246,12 @@ export const ProfileSetupScreen = ({ user, userData, onComplete, config, isReadO
                             </div>
                         )}
 
-                        <div className="flex gap-4 pt-4">
-                            <Button onClick={() => setStep(1)} variant="secondary" className="flex-1">Back</Button>
+                        <div className="flex flex-col sm:flex-row gap-2 sm:gap-4 pt-4">
+                            <Button onClick={() => setStep(1)} variant="secondary" className="flex-1 min-h-[44px]">Back</Button>
                             {!isReadOnly && (
                                 <Button
                                     onClick={handleSubmit}
-                                    className="flex-1"
+                                    className="flex-1 min-h-[44px]"
                                     loading={loading}
                                 >
                                     Complete Entry
