@@ -274,12 +274,11 @@ export const CommitteeChecklist = ({ user, userData, config }) => {
             'public', 'data', 'checklists', dailyDocId);
         const key = `items.${itemId}.${meal}.${field}`;
         try {
-            // Ensure document exists first
+            // Ensure document exists first (without submitted field - committee can't modify it)
             await setDoc(ref, {
                 committeeRole,
                 hostel,
-                date: todayStr,
-                submitted: false
+                date: todayStr
             }, { merge: true });
 
             await updateDoc(ref, {
@@ -298,12 +297,11 @@ export const CommitteeChecklist = ({ user, userData, config }) => {
             'public', 'data', 'checklists', monthlyDocId);
         const key = `items.${itemId}.${field}`;
         try {
-            // Ensure document exists first
+            // Ensure document exists first (without submitted field - committee can't modify it)
             await setDoc(ref, {
                 committeeRole,
                 hostel,
-                month: currentMonth,
-                submitted: false
+                month: currentMonth
             }, { merge: true });
 
             await updateDoc(ref, {
@@ -325,8 +323,7 @@ export const CommitteeChecklist = ({ user, userData, config }) => {
             await setDoc(ref, {
                 committeeRole,
                 hostel,
-                date: todayStr,
-                submitted: false
+                date: todayStr
             }, { merge: true });
 
             await updateDoc(ref, {
