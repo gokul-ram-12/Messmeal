@@ -419,12 +419,26 @@ const App = () => {
         messType: String(profileData.messType || '').trim().toUpperCase(),
         updatedAt: new Date().toISOString()
       };
+
+      // Validate required fields
+      if (!updatePayload.name || !updatePayload.hostel || !updatePayload.messType) {
+        toast.error("Please fill in all required fields");
+        return;
+      }
+
+      console.log('Updating profile with payload:', updatePayload);
       await setDoc(doc(db, 'artifacts', appId, 'users', user.uid), updatePayload, { merge: true });
       toast.success("Profile saved!");
-      console.log('Profile saved successfully:', updatePayload);
+      console.log('Profile saved successfully');
     } catch (error) {
-      console.error('Failed to save profile:', error);
-      toast.error("Failed to update profile. Please try again.");
+      console.error('Failed to save profile:', error.code, error.message);
+      if (error.code === 'permission-denied') {
+        toast.error("You don't have permission to update profile. Try logging in again.");
+      } else if (error.code === 'unauthenticated') {
+        toast.error("You need to be logged in to update profile.");
+      } else {
+        toast.error("Failed to update profile. Please try again.");
+      }
     }
   };
 

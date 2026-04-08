@@ -15,7 +15,8 @@ service cloud.firestore {
     }
 
     function canEditHostel(appId) {
-      return isAdmin(appId) || !get(/databases/$(database)/documents/artifacts/$(appId)/users/$(request.auth.uid)).data.hostelLockedAt;
+      let currentUser = get(/databases/$(database)/documents/artifacts/$(appId)/users/$(request.auth.uid));
+      return isAdmin(appId) || currentUser == null || !currentUser.data.get('hostelLockedAt', null);
     }
 
     function isMiniAdmin(appId) {
@@ -39,7 +40,7 @@ service cloud.firestore {
           (request.auth.uid == userId && canEditHostel(appId) &&
            request.resource.data.keys().hasOnly([
              'name', 'registrationId', 'hostel', 'messType', 'fcmToken',
-             'avatar', 'bio', 'lastSeenAt', 'updatedAt'
+             'avatar', 'bio', 'lastSeenAt', 'updatedAt', 'studyingYear'
            ])) ||
           // Case 2: Admin can update anything
           isAdmin(appId) ||
