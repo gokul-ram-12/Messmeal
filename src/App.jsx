@@ -264,12 +264,8 @@ const App = () => {
       const isFacultyDomain = email.endsWith('@vitap.ac.in') || email.endsWith('@vit.ac.in');
       const isSuperAdminEmail = superAdminEmails.includes(email) || email === superAdminEmail;
 
-
-      const isWhitelisted = WHITELISTED_EMAILS.includes(email);
-
-      // RULE 4: Access check
-      if (!isStudentDomain && !isFacultyDomain &&
-          !isSuperAdminEmail && !isWhitelisted) {
+      // RULE 1: Block non-institutional emails
+      if (!isStudentDomain && !isFacultyDomain && !isSuperAdminEmail) {
         await signOut(auth);
         setIsBlocked(true);
         setActionLoading(false);
@@ -277,6 +273,36 @@ const App = () => {
       }
 
       setIsBlocked(false);
+
+      // RULE 2: Validate intendedRole against email domain & permissions
+      if (intendedRole === 'admin') {
+        // Only super_admin emails can access admin portal
+        if (!isSuperAdminEmail) {
+          await signOut(auth);
+          setAuthError('Admin access requires authorization. Contact your administrator.');
+          toast.error('You do not have admin privileges.');
+          setActionLoading(false);
+          return;
+        }
+      } else if (intendedRole === 'faculty') {
+        // Only faculty domain emails can access faculty portal
+        if (!isFacultyDomain && !isSuperAdminEmail) {
+          await signOut(auth);
+          setAuthError('Faculty/Staff access requires @vitap.ac.in or @vit.ac.in email.');
+          toast.error('Faculty access denied.');
+          setActionLoading(false);
+          return;
+        }
+      } else if (intendedRole === 'student') {
+        // Only student domain emails can access student portal
+        if (!isStudentDomain && !isSuperAdminEmail) {
+          await signOut(auth);
+          setAuthError('Student access requires @vitapstudent.ac.in email.');
+          toast.error('Student access denied.');
+          setActionLoading(false);
+          return;
+        }
+      }
 
       const userRef = doc(db, 'artifacts', appId, 'users', result.user.uid);
       const userSnap = await getDoc(userRef);
@@ -297,8 +323,17 @@ const App = () => {
         });
         toast.success('Account created! Welcome.');
 
-        if (role === 'super_admin') setViewMode('admin');
-        else setViewMode('user');
+        // Set view mode based on role and intendedRole validation
+        if (intendedRole === 'admin' && role !== 'super_admin') {
+          // User tried to access admin but doesn't have privileges
+          setAuthError('You do not have admin privileges. Logging in as regular user.');
+          toast.error('Admin access denied.');
+          setViewMode('user');
+        } else if (role === 'super_admin') {
+          setViewMode('admin');
+        } else {
+          setViewMode('user');
+        }
       } else {
         const existingData = userSnap.data();
 
@@ -343,12 +378,18 @@ const App = () => {
         } else if (existingData.role === 'revoked') {
           // Handled in the render section
           toast.error('Your access has been revoked. Contact the administrator.');
+          setViewMode('user');
         } else if (existingData.role === 'super_admin') {
           setViewMode('admin');
           toast.success(`Welcome back, ${existingData.name || email.split('@')[0]}!`);
+        } else if (intendedRole === 'admin') {
+          // User tried to access admin but they're not super_admin and not approved mini_admin
+          setAuthError('You do not have admin privileges. Defaulting to user view.');
+          toast.error('Admin access denied. You have been logged in as a regular user.');
+          setViewMode('user');
         } else {
           // All other users (students, faculty, mini_admin without approval) → user view
-          // They can switch to admin via button if they have admin role
+          // They can switch to admin via button if they have proper admin role
           setViewMode('user');
           toast.success(`Welcome back, ${existingData.name || email.split('@')[0]}!`);
         }
