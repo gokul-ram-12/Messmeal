@@ -5374,7 +5374,7 @@ export const AdminDashboard = ({ user, userData, onLogout, onSwitchToUser, confi
                                                 </td>
                                                 <td className="p-2 sm:p-5 text-right w-1 min-w-fit sm:min-w-[160px]">
                                                     <div className="flex flex-col gap-0.5 sm:gap-1.5 items-end">
-                                                        <div className="hidden lg:flex lg:flex-col lg:gap-1.5 lg:items-end">
+                                                        <div className="hidden">
                                                         {/* Mini Admin: Can only download/view, no role assignments */}
                                                         {isMiniAdmin ? (
                                                             <span className="text-xs text-zinc-400 italic">View Only</span>
@@ -5543,7 +5543,7 @@ export const AdminDashboard = ({ user, userData, onLogout, onSwitchToUser, confi
                                                         ) : null}
                                                         </div>
                                                         {isMiniAdmin && (
-                                                            <span className="text-xs text-zinc-400 italic lg:hidden">View Only</span>
+                                                            <span className="text-xs text-zinc-400 italic">View Only</span>
                                                         )}
                                                         {!isMiniAdmin && (isSuperAdmin || userData?.role === 'admin') && (
                                                             <button
@@ -5553,7 +5553,7 @@ export const AdminDashboard = ({ user, userData, onLogout, onSwitchToUser, confi
                                                                     setRoleActionUser(u);
                                                                     setShowRoleActionModal(true);
                                                                 }}
-                                                                className="text-xs py-1.5 sm:py-2 px-2 sm:px-3 rounded-lg sm:rounded-xl bg-indigo-500/10 text-indigo-600 border border-indigo-500/30 hover:bg-indigo-500 hover:text-white active:bg-indigo-600 transition-all font-bold min-h-[44px] sm:min-h-[44px] flex items-center justify-center whitespace-nowrap lg:hidden cursor-pointer"
+                                                                className="text-xs py-1.5 sm:py-2 px-2 sm:px-3 rounded-lg sm:rounded-xl bg-indigo-500/10 text-indigo-600 border border-indigo-500/30 hover:bg-indigo-500 hover:text-white active:bg-indigo-600 transition-all font-bold min-h-[44px] sm:min-h-[44px] flex items-center justify-center whitespace-nowrap cursor-pointer"
                                                             >
                                                                 Manage Roles
                                                             </button>
@@ -6870,7 +6870,7 @@ export const AdminDashboard = ({ user, userData, onLogout, onSwitchToUser, confi
                                     ℹ️ The selected hostel will be locked for the user's checklist. User can change their profile hostel anytime.
                                 </p>
                                 <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-2 max-h-[40vh] overflow-y-auto pr-1">
-                                    {defaultHostels.map(h => (
+                                    {(config?.hostels || DEFAULT_HOSTELS).map(h => (
                                         <button
                                             key={h}
                                             onClick={() => setCommitteeModalHostel(h)}

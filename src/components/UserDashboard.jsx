@@ -54,6 +54,27 @@ const setMenuToCache = (cacheKey, data) => {
     }
 };
 
+const normalizeMessType = (value) => {
+    const normalized = String(value || '').trim().toUpperCase();
+    if (!normalized) return '';
+
+    const aliasMap = {
+        VEG: 'VEG',
+        VEGETARIAN: 'VEG',
+        NONVEG: 'NON-VEG',
+        'NON-VEG': 'NON-VEG',
+        NON_VEG: 'NON-VEG',
+        SPL: 'SPL',
+        'SPL STUDENT': 'SPL',
+        'SPL STUDENTS': 'SPL',
+        'SPECIAL': 'SPL',
+        'SPECIAL STUDENT': 'SPL',
+        'SPECIAL STUDENTS': 'SPL'
+    };
+
+    return aliasMap[normalized] || normalized;
+};
+
 const TOUR_SLIDES = [
     {
         emoji: '👋',
@@ -280,7 +301,7 @@ export const UserDashboard = ({ user, userData, onLogout, onSwitchToAdmin, canSw
 
     useEffect(() => {
         const h = (userData?.hostel || '').trim().toUpperCase();
-        const m = (userData?.messType || '').trim().toUpperCase();
+        const m = normalizeMessType(userData?.messType);
         if (!h || !m || !selectedDate) return;
 
         setIsLoadingMenu(true);
@@ -328,7 +349,7 @@ export const UserDashboard = ({ user, userData, onLogout, onSwitchToAdmin, canSw
             setIsLoadingMenu(false);
         };
 
-        const cacheKey = `${userData.hostel}_${userData.messType}_${year}_${month}`;
+        const cacheKey = `${h}_${m}_${year}_${month}`;
         const cached = getMenuFromCache(cacheKey);
         if (cached) {
             menuData = cached;
@@ -344,7 +365,7 @@ export const UserDashboard = ({ user, userData, onLogout, onSwitchToAdmin, canSw
             // In-app notification: menu updated for today
             const todayStr = new Date().toLocaleDateString('en-CA');
             if (selectedDate === todayStr && menuData) {
-                const menuNotifKey = `menu_updated_${todayStr}_${userData?.hostel}_${userData?.messType}`;
+                const menuNotifKey = `menu_updated_${todayStr}_${h}_${m}`;
                 if (!inAppNotifs.some(n => n.id === menuNotifKey)) {
                     addNotif('menu', 'Menu Updated', `Today's menu for ${userData?.hostel} is now available.`, menuNotifKey);
                 }
@@ -391,14 +412,16 @@ export const UserDashboard = ({ user, userData, onLogout, onSwitchToAdmin, canSw
         const unsub = onSnapshot(q, (snap) => {
             const allNotices = snap.docs.map(d => ({ id: d.id, ...d.data() }));
             const h = (userData?.hostel || "").trim().toUpperCase();
-            const m = (userData?.messType || "").trim().toUpperCase();
+            const m = normalizeMessType(userData?.messType);
             const today = new Date().toLocaleDateString('en-CA');
             const relevant = allNotices.filter(n => {
                 // Expiry Check
                 if (n.expiresAt && n.expiresAt < today) return false;
 
                 const targetHostels = Array.isArray(n.targetHostels) ? n.targetHostels.map(x => String(x).trim().toUpperCase()) : (n.hostel ? [String(n.hostel).trim().toUpperCase()] : ['ALL']);
-                const targetMessTypes = Array.isArray(n.targetMessTypes) ? n.targetMessTypes.map(x => String(x).trim().toUpperCase()) : (n.messType ? [String(n.messType).trim().toUpperCase()] : ['ALL']);
+                const targetMessTypes = Array.isArray(n.targetMessTypes)
+                    ? n.targetMessTypes.map(x => normalizeMessType(x))
+                    : (n.messType ? [normalizeMessType(n.messType)] : ['ALL']);
                 return (targetHostels.includes('ALL') || targetHostels.includes(h)) &&
                     (targetMessTypes.includes('ALL') || targetMessTypes.includes(m));
             });
