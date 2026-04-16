@@ -30,9 +30,9 @@ const APP_ID = 'messmeal-default'; // Shared app ID based on current project pat
 
 export default async function handler(req, res) {
     // Only allow Vercel Cron to trigger this
-    // if (req.headers['x-vercel-cron'] !== 'true') {
-    //     return res.status(401).json({ error: 'Unauthorized' });
-    // }
+    if (req.headers['x-vercel-cron'] !== 'true') {
+        return res.status(401).json({ error: 'Unauthorized' });
+    }
 
     console.log('Starting Daily Cleanup Cron Job...');
     const results = {

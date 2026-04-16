@@ -15,6 +15,7 @@ export const ProfileSetupScreen = ({ user, userData, onComplete, config, isReadO
     const isCommitteeUser = userData?.committeeRole;
     const hasAssignedCommitteeHostel = userData?.assignedCommitteeHostel ? true : false;
     const hostelLockReason = userData?.hostelLockedReason;
+    const isHostelLocked = Boolean(userData?.hostelLockedAt && userData?.role !== 'super_admin');
 
     const [name] = useState(userData?.name || user?.displayName || user?.email?.split('@')[0] || '');
     const [avatar, setAvatar] = useState(userData?.avatar || 'boy');
@@ -200,12 +201,17 @@ export const ProfileSetupScreen = ({ user, userData, onComplete, config, isReadO
                                     ℹ️ You can change your hostel anytime, but your checklist hostel is locked to <strong>{userData?.assignedCommitteeHostel}</strong> (assigned by admin). Only admins can change the checklist hostel.
                                 </p>
                             )}
+                            {isHostelLocked && (
+                                <p className="text-xs text-amber-700 dark:text-amber-400 mb-3 italic bg-amber-50 dark:bg-amber-500/10 p-2 rounded">
+                                    🔒 Your hostel is locked by an admin. If this looks wrong, contact support.
+                                </p>
+                            )}
                             <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 sm:gap-3">
                                 {defaultHostels.map(h => (
                                     <button
                                         key={h}
                                         onClick={() => !isReadOnly && setHostel(h)}
-                                        disabled={isReadOnly}
+                                        disabled={isReadOnly || isHostelLocked}
                                         className={`p-3 sm:p-4 rounded-2xl text-xs sm:text-sm font-bold transition-all duration-200 border min-h-[44px] flex items-center justify-center ${isReadOnly ? 'cursor-not-allowed' : 'cursor-pointer'} ${hostel === h ? 'bg-primary/20 text-primary border-primary shadow-sm scale-[1.02]' : 'bg-black/5 dark: text-mid dark:text-zinc-400 hover:bg-black/10 dark:hover:bg-white/10 hover:text-dark dark:hover:text-white border-black/10 dark:border-white/10'}`}
                                     >
                                         {h}

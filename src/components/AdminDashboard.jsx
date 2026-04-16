@@ -120,6 +120,8 @@ export const AdminDashboard = ({ user, userData, onLogout, onSwitchToUser, confi
     const [committeeModalUser, setCommitteeModalUser] = useState(null);
     const [committeeModalHostel, setCommitteeModalHostel] = useState(null);
     const [committeeModalRole, setCommitteeModalRole] = useState(null);
+    const [showRoleActionModal, setShowRoleActionModal] = useState(false);
+    const [roleActionUser, setRoleActionUser] = useState(null);
 
     // Data states
     const [usersList, setUsersList] = useState([]);
@@ -5372,6 +5374,7 @@ export const AdminDashboard = ({ user, userData, onLogout, onSwitchToUser, confi
                                                 </td>
                                                 <td className="p-2 sm:p-5 text-right w-1 min-w-fit sm:min-w-[160px]">
                                                     <div className="flex flex-col gap-0.5 sm:gap-1.5 items-end">
+                                                        <div className="hidden lg:flex lg:flex-col lg:gap-1.5 lg:items-end">
                                                         {/* Mini Admin: Can only download/view, no role assignments */}
                                                         {isMiniAdmin ? (
                                                             <span className="text-xs text-zinc-400 italic">View Only</span>
@@ -5538,17 +5541,21 @@ export const AdminDashboard = ({ user, userData, onLogout, onSwitchToUser, confi
                                                                 Revoke
                                                             </button>
                                                         ) : null}
+                                                        </div>
+                                                        {isMiniAdmin && (
+                                                            <span className="text-xs text-zinc-400 italic lg:hidden">View Only</span>
+                                                        )}
                                                         {!isMiniAdmin && (isSuperAdmin || userData?.role === 'admin') && (
                                                             <button
                                                                 onClick={(e) => {
                                                                     e.preventDefault();
                                                                     e.stopPropagation();
-                                                                    setCommitteeModalUser(u);
-                                                                    setShowCommitteeModal(true);
+                                                                    setRoleActionUser(u);
+                                                                    setShowRoleActionModal(true);
                                                                 }}
                                                                 className="text-xs py-1.5 sm:py-2 px-2 sm:px-3 rounded-lg sm:rounded-xl bg-indigo-500/10 text-indigo-600 border border-indigo-500/30 hover:bg-indigo-500 hover:text-white active:bg-indigo-600 transition-all font-bold min-h-[44px] sm:min-h-[44px] flex items-center justify-center whitespace-nowrap lg:hidden cursor-pointer"
                                                             >
-                                                                Set Committee
+                                                                Manage Roles
                                                             </button>
                                                         )}
                                                     </div>
@@ -6862,7 +6869,7 @@ export const AdminDashboard = ({ user, userData, onLogout, onSwitchToUser, confi
                                 <p className="text-xs text-amber-600 dark:text-amber-400 bg-amber-50 dark:bg-amber-500/10 p-2 rounded mb-3">
                                     ℹ️ The selected hostel will be locked for the user's checklist. User can change their profile hostel anytime.
                                 </p>
-                                <div className="grid grid-cols-2 gap-2">
+                                <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-2 max-h-[40vh] overflow-y-auto pr-1">
                                     {defaultHostels.map(h => (
                                         <button
                                             key={h}
@@ -6922,6 +6929,215 @@ export const AdminDashboard = ({ user, userData, onLogout, onSwitchToUser, confi
                 </div>
             )}
 
+            {showRoleActionModal && roleActionUser && (
+                <div className="fixed inset-0 z-[10000] bg-black/60 backdrop-blur-sm flex items-end sm:items-center justify-center p-0 sm:p-6">
+                    <div className="bg-white dark:bg-[#1A1A2E] rounded-t-3xl sm:rounded-3xl shadow-2xl p-4 sm:p-6 w-full sm:max-w-sm border border-white/10 max-h-[90vh] overflow-y-auto pointer-events-auto">
+                        <h3 className="font-heading font-black text-base sm:text-lg text-dark dark:text-white tracking-tight mb-2">
+                            Manage Roles
+                        </h3>
+                        <p className="text-xs text-zinc-400 font-medium mb-6">
+                            {roleActionUser?.name || roleActionUser?.email}
+                        </p>
+
+                        <div className="space-y-3">
+                            <Button
+                                type="button"
+                                onClick={() => {
+                                    const targetUser = roleActionUser;
+                                    setRoleActionUser(null);
+                                    setShowRoleActionModal(false);
+                                    setCommitteeModalUser(targetUser);
+                                    setCommitteeModalRole(null);
+                                    setCommitteeModalHostel(null);
+                                    setShowCommitteeModal(true);
+                                }}
+                                className="w-full py-3 min-h-[44px]"
+                            >
+                                Committee Role
+                            </Button>
+                            {roleActionUser?.role === 'revoked' && (
+                                <Button
+                                    type="button"
+                                    onClick={() => {
+                                        const targetUser = roleActionUser;
+                                        setRoleActionUser(null);
+                                        setShowRoleActionModal(false);
+                                        approveUser(targetUser.id, targetUser);
+                                    }}
+                                    className="w-full py-3 min-h-[44px] bg-emerald-500 hover:bg-emerald-600 text-white"
+                                >
+                                    Restore Access
+                                </Button>
+                            )}
+                            {roleActionUser?.role === 'admin' && (
+                                <>
+                                    <Button
+                                        type="button"
+                                        onClick={() => {
+                                            const targetUser = roleActionUser;
+                                            setRoleActionUser(null);
+                                            setShowRoleActionModal(false);
+                                            demoteAdmin(targetUser.id, targetUser.email);
+                                        }}
+                                        className="w-full py-3 min-h-[44px] bg-amber-500 hover:bg-amber-600 text-white"
+                                    >
+                                        Remove Admin
+                                    </Button>
+                                    <Button
+                                        type="button"
+                                        onClick={() => {
+                                            const targetUser = roleActionUser;
+                                            setRoleActionUser(null);
+                                            setShowRoleActionModal(false);
+                                            revokeUser(targetUser.id, targetUser.role);
+                                        }}
+                                        className="w-full py-3 min-h-[44px] bg-red-500 hover:bg-red-600 text-white"
+                                    >
+                                        Revoke All
+                                    </Button>
+                                </>
+                            )}
+                            {roleActionUser?.role === 'faculty' && roleActionUser?.role !== 'super_admin' && (
+                                <>
+                                    <Button
+                                        type="button"
+                                        onClick={() => {
+                                            const targetUser = roleActionUser;
+                                            setRoleActionUser(null);
+                                            setShowRoleActionModal(false);
+                                            restoreAdmin(targetUser.id);
+                                        }}
+                                        className="w-full py-3 min-h-[44px] bg-blue-500 hover:bg-blue-600 text-white"
+                                    >
+                                        Make Admin
+                                    </Button>
+                                    <Button
+                                        type="button"
+                                        onClick={() => {
+                                            const targetUser = roleActionUser;
+                                            setRoleActionUser(null);
+                                            setShowRoleActionModal(false);
+                                            setMiniAdminTargetUser(targetUser);
+                                            setShowMiniAdminModal(true);
+                                        }}
+                                        className="w-full py-3 min-h-[44px] bg-purple-500 hover:bg-purple-600 text-white"
+                                    >
+                                        Mini Admin
+                                    </Button>
+                                    <Button
+                                        type="button"
+                                        onClick={() => {
+                                            const targetUser = roleActionUser;
+                                            setRoleActionUser(null);
+                                            setShowRoleActionModal(false);
+                                            revokeUser(targetUser.id, targetUser.role);
+                                        }}
+                                        className="w-full py-3 min-h-[44px] bg-red-500 hover:bg-red-600 text-white"
+                                    >
+                                        Revoke
+                                    </Button>
+                                </>
+                            )}
+                            {roleActionUser?.role === 'mini_admin' && (
+                                <>
+                                    <Button
+                                        type="button"
+                                        onClick={() => {
+                                            const targetUser = roleActionUser;
+                                            setRoleActionUser(null);
+                                            setShowRoleActionModal(false);
+                                            setMiniAdminTargetUser(targetUser);
+                                            setShowMiniAdminModal(true);
+                                        }}
+                                        className="w-full py-3 min-h-[44px] bg-purple-500 hover:bg-purple-600 text-white"
+                                    >
+                                        Edit Hostels
+                                    </Button>
+                                    <Button
+                                        type="button"
+                                        onClick={() => {
+                                            const targetUser = roleActionUser;
+                                            setRoleActionUser(null);
+                                            setShowRoleActionModal(false);
+                                            removeMiniAdmin(targetUser.id);
+                                        }}
+                                        className="w-full py-3 min-h-[44px] bg-amber-500 hover:bg-amber-600 text-white"
+                                    >
+                                        Remove Mini Admin
+                                    </Button>
+                                    <Button
+                                        type="button"
+                                        onClick={() => {
+                                            const targetUser = roleActionUser;
+                                            setRoleActionUser(null);
+                                            setShowRoleActionModal(false);
+                                            revokeUser(targetUser.id, targetUser.role);
+                                        }}
+                                        className="w-full py-3 min-h-[44px] bg-red-500 hover:bg-red-600 text-white"
+                                    >
+                                        Revoke
+                                    </Button>
+                                </>
+                            )}
+                            {roleActionUser?.role === 'student' && (
+                                <Button
+                                    type="button"
+                                    onClick={() => {
+                                        const targetUser = roleActionUser;
+                                        setRoleActionUser(null);
+                                        setShowRoleActionModal(false);
+                                        revokeUser(targetUser.id, targetUser.role);
+                                    }}
+                                    className="w-full py-3 min-h-[44px] bg-red-500 hover:bg-red-600 text-white"
+                                >
+                                    Revoke
+                                </Button>
+                            )}
+                            {roleActionUser?.role !== 'super_admin' && roleActionUser?.role !== 'admin' && roleActionUser?.role !== 'faculty' && roleActionUser?.role !== 'mini_admin' && roleActionUser?.role !== 'student' && roleActionUser?.role !== 'revoked' && (
+                                <Button
+                                    type="button"
+                                    onClick={() => {
+                                        const targetUser = roleActionUser;
+                                        setRoleActionUser(null);
+                                        setShowRoleActionModal(false);
+                                        restoreAdmin(targetUser.id);
+                                    }}
+                                    className="w-full py-3 min-h-[44px] bg-blue-500 hover:bg-blue-600 text-white"
+                                >
+                                    Make Admin
+                                </Button>
+                            )}
+                            {roleActionUser?.role !== 'super_admin' && roleActionUser?.role !== 'mini_admin' && roleActionUser?.role !== 'admin' && roleActionUser?.role !== 'faculty' && roleActionUser?.role !== 'student' && roleActionUser?.role !== 'revoked' && (
+                                <Button
+                                    type="button"
+                                    onClick={() => {
+                                        const targetUser = roleActionUser;
+                                        setRoleActionUser(null);
+                                        setShowRoleActionModal(false);
+                                        setMiniAdminTargetUser(targetUser);
+                                        setShowMiniAdminModal(true);
+                                    }}
+                                    className="w-full py-3 min-h-[44px] bg-purple-500 hover:bg-purple-600 text-white"
+                                >
+                                    Mini Admin
+                                </Button>
+                            )}
+                            <Button
+                                type="button"
+                                variant="secondary"
+                                onClick={() => {
+                                    setRoleActionUser(null);
+                                    setShowRoleActionModal(false);
+                                }}
+                                className="w-full py-3 min-h-[44px]"
+                            >
+                                Close
+                            </Button>
+                        </div>
+                    </div>
+                </div>
+            )}
+
             {showQrModal && qrCodeUrl && (
                 <div className="fixed inset-0 z-[200]
                     bg-black/70 backdrop-blur-sm flex
@@ -6976,7 +7192,6 @@ export const AdminDashboard = ({ user, userData, onLogout, onSwitchToUser, confi
                                     setShowQrModal(false)}
                                 variant="secondary"
                                 className="flex-1 py-2.5 sm:py-3
-                                    font-black uppercase
                                     tracking-widest text-xs sm:text-sm
                                     min-h-[44px]"
                             >

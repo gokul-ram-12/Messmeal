@@ -16,7 +16,7 @@ service cloud.firestore {
 
     function canEditHostel(appId) {
       let currentUser = get(/databases/$(database)/documents/artifacts/$(appId)/users/$(request.auth.uid));
-      return isAdmin(appId) || currentUser == null || !currentUser.data.get('hostelLockedAt', null);
+      return userRole(appId) == 'super_admin' || currentUser == null || !currentUser.data.get('hostelLockedAt', null);
     }
 
     function isMiniAdmin(appId) {
@@ -47,6 +47,7 @@ service cloud.firestore {
           // Case 3: Mini-admin update other users in their hostels (limited fields)
           (isMiniAdmin(appId) &&
             resource.data.hostel in miniAdminHostels(appId) &&
+            resource.data.role == 'student' &&
             !request.resource.data.keys().hasAny(['role', 'adminApproved', 'approved', 'assignedHostels']))
         );
     }
@@ -115,7 +116,8 @@ service cloud.firestore {
       // Allow committee members to create checklist docs used by autosave.
       allow create: if request.auth != null
         && (isAdmin(appId)
-          || get(/databases/$(database)/documents/artifacts/$(appId)/users/$(request.auth.uid)).data.committeeRole != null);
+          || (get(/databases/$(database)/documents/artifacts/$(appId)/users/$(request.auth.uid)).data.committeeRole != null
+            && get(/databases/$(database)/documents/artifacts/$(appId)/users/$(request.auth.uid)).data.approved == true));
 
       // Committee members can update checklist items (status, remarks, etc.)
       // but cannot modify sensitive identity fields.

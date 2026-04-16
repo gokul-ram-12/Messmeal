@@ -1,9 +1,48 @@
 import { NextResponse } from 'next/server';
-import { adminDb } from '../../../../src/lib/firebaseAdmin';
+import { adminDb, adminAuth } from '../../../../src/lib/firebaseAdmin';
 import { sendAdminNotificationEmail } from '../../../../src/lib/mailer';
+
+async function verifyAuth(request) {
+    try {
+        const authHeader = request.headers.get('authorization');
+        if (!authHeader?.startsWith('Bearer ')) {
+            return null;
+        }
+
+        const token = authHeader.split('Bearer ')[1];
+        return await adminAuth.verifyIdToken(token);
+    } catch {
+        return null;
+    }
+}
+
+async function isSuperAdmin(uid) {
+    try {
+        const userDoc = await adminDb
+            .collection('artifacts')
+            .doc('messmeal-default')
+            .collection('users')
+            .doc(uid)
+            .get();
+
+        return userDoc.data()?.role === 'super_admin';
+    } catch {
+        return false;
+    }
+}
 
 export async function POST(request) {
     try {
+        const authUser = await verifyAuth(request);
+        if (!authUser) {
+            return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+        }
+
+        const superAdminAllowed = await isSuperAdmin(authUser.uid);
+        if (!superAdminAllowed) {
+            return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
+        }
+
         const { newEmail } = await request.json();
 
         if (!newEmail) {

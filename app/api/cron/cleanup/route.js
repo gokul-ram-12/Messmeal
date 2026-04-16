@@ -6,9 +6,9 @@ export const dynamic = 'force-dynamic'; // Ensure the route is not statically op
 
 export async function GET(request) {
     // SECURITY: Ensure only Vercel Cron can trigger this endpoint
-    // if (request.headers.get('x-vercel-cron') !== 'true') {
-    //     return new NextResponse('Unauthorized', { status: 401 });
-    // }
+    if (request.headers.get('x-vercel-cron') !== 'true') {
+        return new NextResponse('Unauthorized', { status: 401 });
+    }
 
     console.log('CRON: Monthly/Daily Cleanup procedure initiated.');
 

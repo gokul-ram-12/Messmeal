@@ -25,15 +25,28 @@ class ErrorBoundary extends React.Component {
   static getDerivedStateFromError(error) {
     return { hasError: true, error };
   }
+  componentDidCatch(error, errorInfo) {
+    console.error('Application error boundary caught:', error, errorInfo);
+  }
   render() {
     if (this.state.hasError) {
       return (
-        <div className="p-10 text-red-500 bg-white min-h-screen">
-          <h1 className="text-3xl font-bold">Application Error</h1>
-          <pre className="mt-4 p-4 bg-red-50 text-sm overflow-auto text-left">
-            {this.state.error?.toString()}{"\n"}
-            {this.state.error?.stack}
-          </pre>
+        <div className="p-10 text-red-500 bg-white min-h-screen flex items-center justify-center">
+          <div className="max-w-xl w-full rounded-2xl border border-red-100 bg-red-50 p-6 shadow-sm">
+            <h1 className="text-3xl font-bold">Application Error</h1>
+            <p className="mt-3 text-sm text-red-700">
+              Something went wrong while loading the app. Please refresh the page and try again.
+            </p>
+            <button
+              onClick={() => window.location.reload()}
+              className="mt-6 rounded-xl bg-red-600 px-4 py-2 text-sm font-bold text-white hover:bg-red-700"
+            >
+              Reload App
+            </button>
+            <p className="mt-4 text-xs text-red-500">
+              Error reference: {this.state.error?.message || 'unknown'}
+            </p>
+          </div>
         </div>
       );
     }
@@ -181,6 +194,10 @@ const App = () => {
   // Session timeout: refresh Firebase token on tab visibility change
   useEffect(() => {
     if (!user) return;
+
+    user.getIdToken(true).catch((error) => {
+      console.error('Initial token refresh failed:', error);
+    });
 
     const handleVisibilityChange = async () => {
       if (document.visibilityState === 'visible') {
