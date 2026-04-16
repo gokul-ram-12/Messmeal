@@ -33,12 +33,12 @@ service cloud.firestore {
     }
 
     function isStudentEmail() {
-      return request.auth.token.email.matches('.*@vitapstudent\.ac\.in$');
+      return request.auth.token.email.matches('.*@vitapstudent\\.ac\\.in$');
     }
 
     function isFacultyEmail() {
-      return request.auth.token.email.matches('.*@vitap\.ac\.in$') ||
-        request.auth.token.email.matches('.*@vit\.ac\.in$');
+      return request.auth.token.email.matches('.*@vitap\\.ac\\.in$') ||
+        request.auth.token.email.matches('.*@vit\\.ac\\.in$');
     }
 
     match /artifacts/{appId}/users/{userId} {
