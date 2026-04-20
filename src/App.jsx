@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { signInWithPopup, GoogleAuthProvider, signOut, onAuthStateChanged } from 'firebase/auth';
 import { doc, getDoc, setDoc, updateDoc, onSnapshot } from 'firebase/firestore';
-import { auth, db, appId, getMessagingInstance } from './lib/firebase';
+import { auth, db, appId, getMessagingInstance, getMissingFirebaseEnvVars, hasValidFirebaseConfig } from './lib/firebase';
 import { getToken } from 'firebase/messaging';
 import { INITIAL_SUPER_ADMIN_EMAIL, SUPER_ADMIN_EMAILS, WHITELISTED_EMAILS } from './lib/constants';
 import { Toaster, toast } from 'react-hot-toast';
@@ -16,6 +16,27 @@ import { InstallAppModal } from './components/ui/InstallAppModal';
 import { LoadingScreen } from './components/ui/LoadingScreen';
 import { SplashScreen } from './components/ui/SplashScreen';
 import { motion, AnimatePresence } from 'framer-motion';
+
+const getFriendlyAuthErrorMessage = (error) => {
+  switch (error?.code) {
+    case 'auth/unauthorized-domain':
+      return `Login is blocked for this domain. Add ${window.location.hostname} to Firebase Auth > Authorized domains.`;
+    case 'auth/invalid-api-key':
+      return 'Firebase API key is invalid or missing. Check your Vercel/Firebase environment variables.';
+    case 'auth/configuration-not-found':
+      return 'Google Sign-In is not enabled in Firebase Authentication settings.';
+    case 'auth/operation-not-allowed':
+      return 'Google Sign-In provider is disabled in Firebase Authentication.';
+    case 'auth/network-request-failed':
+      return 'Network error while signing in. Check internet/CSP/firewall settings and try again.';
+    case 'auth/popup-blocked':
+      return 'Popup was blocked by the browser. Enable popups for this site and try again.';
+    case 'auth/popup-closed-by-user':
+      return null;
+    default:
+      return error?.message || 'Failed to sign in.';
+  }
+};
 
 class ErrorBoundary extends React.Component {
   constructor(props) {
@@ -267,6 +288,17 @@ const App = () => {
   const login = async (intendedRole) => {
     setAuthError(null);
     setActionLoading(true);
+
+    if (!hasValidFirebaseConfig()) {
+      const missingVars = getMissingFirebaseEnvVars();
+      const message = `Firebase configuration is missing: ${missingVars.join(', ')}`;
+      setAuthError(message);
+      toast.error('Login is unavailable: Firebase config is missing.');
+      console.error('Login blocked due to missing Firebase env vars:', missingVars);
+      setActionLoading(false);
+      return;
+    }
+
     const provider = new GoogleAuthProvider();
     provider.setCustomParameters({ prompt: 'select_account' });
 
@@ -412,10 +444,18 @@ const App = () => {
         }
       }
     } catch (error) {
-      if (error.code !== 'auth/popup-closed-by-user') {
-        setAuthError(error.message);
-        toast.error('Failed to sign in.');
+      const friendlyMessage = getFriendlyAuthErrorMessage(error);
+      if (friendlyMessage) {
+        setAuthError(friendlyMessage);
+        toast.error(friendlyMessage);
       }
+      console.error('Google sign-in failed:', {
+        code: error?.code,
+        message: error?.message,
+        origin: window.location.origin,
+        authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN,
+        projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID
+      });
     }
     setActionLoading(false);
   };

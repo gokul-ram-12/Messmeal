@@ -18,6 +18,24 @@ const firebaseConfig = {
     appId: import.meta.env.VITE_FIREBASE_APP_ID
 };
 
+  const REQUIRED_FIREBASE_ENV_KEYS = [
+    'VITE_FIREBASE_API_KEY',
+    'VITE_FIREBASE_AUTH_DOMAIN',
+    'VITE_FIREBASE_PROJECT_ID',
+    'VITE_FIREBASE_STORAGE_BUCKET',
+    'VITE_FIREBASE_MESSAGING_SENDER_ID',
+    'VITE_FIREBASE_APP_ID'
+  ];
+
+  export const getMissingFirebaseEnvVars = () => {
+    return REQUIRED_FIREBASE_ENV_KEYS.filter((key) => {
+      const value = import.meta.env[key];
+      return typeof value !== 'string' || value.trim().length === 0;
+    });
+  };
+
+  export const hasValidFirebaseConfig = () => getMissingFirebaseEnvVars().length === 0;
+
 export const app = initializeApp(firebaseConfig);
 export const auth = getAuth(app);
 
