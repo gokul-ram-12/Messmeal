@@ -13,8 +13,9 @@ service cloud.firestore {
     function canEditHostel(appId) {
       let currentUser = get(/databases/$(database)/documents/artifacts/$(appId)/users/$(request.auth.uid));
       let userRoleVal = currentUser.data.get('role', null);
-      // Allow if super_admin, user doc null, or hostel not locked
-      return userRoleVal == 'super_admin' || currentUser == null || !currentUser.data.get('hostelLockedAt', null);
+      let hostelLockedAt = currentUser.data.get('hostelLockedAt', null);
+      // Allow if super_admin OR hostel is not locked
+      return userRoleVal == 'super_admin' || hostelLockedAt == null;
     }
 
     function isMiniAdmin(appId) {
@@ -67,7 +68,7 @@ service cloud.firestore {
                     'assignedCommitteeHostelAt', 'adminRequested', 'adminApprovedAt',
                     'adminAddedBy', 'adminAddedAt'
                   ]) &&
-                  (canEditHostel(appId) || resource.data.hostel == null || request.resource.data.hostel == resource.data.hostel)
+                  ((isStudentEmail() || isFacultyEmail()) && (canEditHostel(appId) || resource.data.hostel == null || request.resource.data.hostel == resource.data.hostel))
                 ) ||
                 (
                   resource.data.role == null &&
