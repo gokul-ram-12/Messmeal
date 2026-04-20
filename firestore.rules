@@ -12,7 +12,9 @@ service cloud.firestore {
 
     function canEditHostel(appId) {
       let currentUser = get(/databases/$(database)/documents/artifacts/$(appId)/users/$(request.auth.uid));
-      return userRole(appId) == 'super_admin' || currentUser == null || !currentUser.data.get('hostelLockedAt', null);
+      let userRoleVal = currentUser.data.get('role', null);
+      // Allow if super_admin, user doc null, or hostel not locked
+      return userRoleVal == 'super_admin' || currentUser == null || !currentUser.data.get('hostelLockedAt', null);
     }
 
     function isMiniAdmin(appId) {
